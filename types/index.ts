@@ -62,9 +62,13 @@ export interface UserProfile {
   streak: number;
   totalWorkouts: number;
   debuffs: Debuff[];
-  passiveSkills: PassiveSkill[];
-  movementProgress: Record<MovementPillar, MovementProgress>;
+  passiveSkills: string[];
+  pillarLevels: Record<MovementPillar, PillarLevel>; // Novo sistema de níveis por pilar
+  userSkills: Record<string, UserSkill>; // Skills desbloqueadas e progresso
+  customSkills?: Record<MovementPillar, SkillDefinition[]>;
+  skillConstraints?: Record<string, SkillConstraint>;
   hasGymAccess?: boolean;
+  availableEquipment?: string[];
   geminiApiKey?: string | null;
   bioData?: string; // Additional info from onboarding
   availableTime?: number; // Minutes per day
@@ -75,6 +79,11 @@ export interface Quest {
   id: string;
   name: string;
   description: string;
+  executionGuide?: string;
+  skillId?: string;
+  skillLevel?: number;
+  skillTags?: string[];
+  skillReason?: string;
   type: QuestType;
   pillar: MovementPillar;
   sets: number;
@@ -98,12 +107,68 @@ export interface Debuff {
   expiresAt?: Date;
 }
 
-export interface PassiveSkill {
+export interface SkillDefinition {
   id: string;
   name: string;
   description: string;
+  pillar: MovementPillar;
+  level: number; // 0-4 (5 níveis)
+  skillIndex: number; // 0-4 (5 skills por nível)
+  requirements: {
+    pillarLevel: number; // nível mínimo do pilar necessário
+    description: string;
+  };
+  benefits: string[];
   icon: string;
-  unlockedAt: Date;
+  tags?: string[];
+  clinicalReason?: string;
+  source?: 'core' | 'adaptive-ai' | 'assessment-ai' | 'gym-variant' | 'user';
+}
+
+export interface UserSkill {
+  skillId: string;
+  unlocked: boolean;
+  unlockedAt?: Date;
+  masteryLevel: number; // XP acumulado da skill (0-500)
+}
+
+export interface SkillConstraint {
+  skillId: string;
+  status: 'active' | 'disabled';
+  reason: string;
+  condition?: string;
+  tags?: string[];
+  updatedAt?: Date;
+}
+
+export interface PillarLevel {
+  pillar: MovementPillar;
+  level: number; // 0-4 (5 níveis)
+  xp: number;
+  xpToNext: number;
+  unlockedSkills: string[]; // IDs das skills desbloqueadas
+  currentSkillFocus?: string; // Skill que está treinando atualmente
+}
+
+export interface LevelUpChallenge {
+  id: string;
+  pillar: MovementPillar;
+  fromLevel: number;
+  toLevel: number;
+  challenge: {
+    name: string;
+    description: string;
+    requirements: string[];
+    timeLimit?: number; // em minutos
+  };
+  rewards: {
+    xpBonus: number;
+    skillUnlocks: string[];
+  };
+  risk: {
+    xpPenalty: number; // XP perdido se falhar
+    debuffChance: number; // chance de debuff temporário
+  };
 }
 
 export interface MovementProgress {
@@ -116,7 +181,7 @@ export interface MovementProgress {
 export interface RecoveryStatus {
   recoveryRateHours: number;
   debuffs: Debuff[];
-  passiveSkills: PassiveSkill[];
+  passiveSkills: string[];
 }
 
 export interface CheckInEntry {
@@ -139,18 +204,47 @@ export interface TrainingLogEntry {
 export interface StatusWindow {
   recoveryRateHours: number;
   debuffs: Debuff[];
-  passiveSkills: PassiveSkill[];
+  passiveSkills: string[];
   athleteTier: AthleteTier;
   movementProgress: Record<MovementPillar, MovementProgress>;
 }
 
+export type EquipmentCategory =
+  | 'free-weight'
+  | 'barbell'
+  | 'machine'
+  | 'cable'
+  | 'bodyweight'
+  | 'cardio'
+  | 'accessory'
+  | 'other';
+
 export interface Equipment {
   id: string;
-  slot: 'weapon' | 'head' | 'chest' | 'hands' | 'accessory' | 'boots';
   name: string;
-  icon: string;
-  bonus: string;
-  equipped: boolean;
+  category?: EquipmentCategory;
+  notes?: string;
+  enabledForAI?: boolean;
+  source?: 'assessment-ai' | 'user' | 'system';
+  // Legacy fields kept optional for backward compatibility with older persisted data.
+  slot?: 'weapon' | 'head' | 'chest' | 'hands' | 'accessory' | 'boots';
+  icon?: string;
+  bonus?: string;
+  equipped?: boolean;
+}
+
+export interface CompletedTrainingQuest {
+  questId: string;
+  name: string;
+  pillar: MovementPillar;
+  skillId?: string;
+  skillLevel?: number;
+  skillTags?: string[];
+  skillReason?: string;
+  sets: number;
+  reps: number | string;
+  xpReward: number;
+  completedAt?: Date;
 }
 
 export interface TrainingDay {
@@ -158,6 +252,7 @@ export interface TrainingDay {
   completed: boolean;
   questsCompleted: number;
   expGained: number;
+  completedQuests?: CompletedTrainingQuest[];
 }
 
 export type AppScreen = 
@@ -201,13 +296,13 @@ export const ATHLETE_TIER_THRESHOLDS: { tier: AthleteTier; minLevel: number }[] 
   { tier: 'Diamante', minLevel: 90 },
 ];
 
-export const BASE_MOVEMENT_PROGRESS: Record<MovementPillar, MovementProgress> = {
-  push: { pillar: 'push', level: 1, xp: 0, xpToNext: 100 },
-  pull: { pillar: 'pull', level: 1, xp: 0, xpToNext: 100 },
-  core: { pillar: 'core', level: 1, xp: 0, xpToNext: 100 },
-  legs: { pillar: 'legs', level: 1, xp: 0, xpToNext: 100 },
-  mobility: { pillar: 'mobility', level: 1, xp: 0, xpToNext: 100 },
-  endurance: { pillar: 'endurance', level: 1, xp: 0, xpToNext: 100 },
+export const BASE_PILLAR_LEVELS: Record<MovementPillar, PillarLevel> = {
+  push: { pillar: 'push', level: 0, xp: 0, xpToNext: 100, unlockedSkills: [] },
+  pull: { pillar: 'pull', level: 0, xp: 0, xpToNext: 100, unlockedSkills: [] },
+  core: { pillar: 'core', level: 0, xp: 0, xpToNext: 100, unlockedSkills: [] },
+  legs: { pillar: 'legs', level: 0, xp: 0, xpToNext: 100, unlockedSkills: [] },
+  mobility: { pillar: 'mobility', level: 0, xp: 0, xpToNext: 100, unlockedSkills: [] },
+  endurance: { pillar: 'endurance', level: 0, xp: 0, xpToNext: 100, unlockedSkills: [] },
 };
 
 export const STAT_COLORS: Record<keyof UserStats, string> = {

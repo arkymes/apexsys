@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Shadow Gym - AI-Powered Fitness RPG",
-  description: "Transform your fitness journey into an epic adventure. Train like a hunter, level up your body.",
+  title: "APEXSYS - AI-Powered Fitness RPG",
+  description: "Transform your fitness journey into a calibrated progression system with AI-guided training.",
   keywords: ["fitness", "workout", "rpg", "gamification", "ai trainer", "exercise"],
 };
 

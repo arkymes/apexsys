@@ -5,25 +5,44 @@ import { useState, useEffect } from 'react';
 import { 
   Dumbbell, 
   CheckCircle2, 
+  Loader2,
   Clock, 
   Flame,
-  Target,
-  ChevronRight,
+  Shield,
+  Heart,
+  Move,
   Moon,
   Zap,
-  AlertTriangle,
   MessageSquare
 } from 'lucide-react';
-import { GlassPanel } from '@/components/ui/CyberFrame';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store/useAppStore';
 import type { Quest } from '@/types';
+import { sanitizeText } from '@/lib/textSanitizer';
 
 const difficultyColors = {
   easy: '#22c55e',
   medium: '#eab308',
   hard: '#ef4444',
 };
+
+const pillarColors = {
+  push: '#ef4444',
+  pull: '#eab308',
+  core: '#8b5cf6',
+  legs: '#3b82f6',
+  mobility: '#22c55e',
+  endurance: '#ec4899',
+} as const;
+
+const pillarIcons = {
+  push: Flame,
+  pull: Zap,
+  core: Shield,
+  legs: Dumbbell,
+  mobility: Move,
+  endurance: Heart,
+} as const;
 
 interface QuestCardProps {
   quest: Quest;
@@ -32,6 +51,8 @@ interface QuestCardProps {
 
 function QuestCard({ quest, onComplete }: QuestCardProps) {
   const isCompleted = quest.status === 'completed';
+  const PillarIcon = pillarIcons[quest.pillar] || Dumbbell;
+  const pillarColor = pillarColors[quest.pillar] || '#00d4ff';
 
   return (
     <motion.div
@@ -47,24 +68,29 @@ function QuestCard({ quest, onComplete }: QuestCardProps) {
     >
       {/* Quest type indicator */}
       {quest.type === 'daily' && (
-        <div className="absolute top-2 right-2 px-2 py-0.5 bg-neon-blue/20 rounded text-xs font-display text-neon-blue uppercase">
-          Daily
+        <div className="absolute top-2 right-2 px-2 py-1 bg-neon-blue/20 rounded text-xs font-display text-neon-blue uppercase text-right">
+          <span>Daily</span>
+          {typeof quest.skillLevel === 'number' && (
+            <span className="block text-[10px] font-mono tracking-normal text-white/75 normal-case mt-0.5">
+              Skill L{quest.skillLevel}
+            </span>
+          )}
         </div>
       )}
       
       <div className="p-6">
         {/* Icon */}
         <div className="w-12 h-12 rounded-lg bg-shadow-600 border border-white/10 flex items-center justify-center mb-4">
-          <Dumbbell className="w-6 h-6 text-neon-blue" />
+          <PillarIcon className="w-6 h-6" style={{ color: pillarColor }} />
         </div>
 
         {/* Title */}
         <h3 className={`font-display text-xl font-bold mb-2 ${isCompleted ? 'text-white/50 line-through' : 'text-white'}`}>
-          {quest.name}
+          {sanitizeText(quest.name)}
         </h3>
 
         {/* Description */}
-        <p className="text-white/50 text-sm mb-4 font-body">{quest.description}</p>
+        <p className="text-white/50 text-sm mb-4 font-body">{sanitizeText(quest.description)}</p>
 
         {/* Difficulty indicators */}
         <div className="flex gap-1 mb-4">
@@ -94,7 +120,7 @@ function QuestCard({ quest, onComplete }: QuestCardProps) {
           </div>
           <div className="text-center">
             <div className="text-white/40 text-xs uppercase mb-1">Sets/Reps</div>
-            <div className="text-white font-display">{quest.sets}×{quest.reps}</div>
+            <div className="text-white font-display">{quest.sets}x{quest.reps}</div>
           </div>
           <div className="text-center">
             <div className="text-white/40 text-xs uppercase mb-1">Difficulty</div>
@@ -109,9 +135,37 @@ function QuestCard({ quest, onComplete }: QuestCardProps) {
 
         {/* Exercise info */}
         <div className="flex items-center justify-between p-3 bg-shadow-700/50 rounded-lg border border-white/5 mb-4">
-          <span className="text-white/80 font-body">{quest.name}</span>
-          <span className="text-white/40 font-mono text-sm">{quest.sets}× {quest.reps}</span>
+          <span className="text-white/80 font-body">{sanitizeText(quest.name)}</span>
+          <span className="text-white/40 font-mono text-sm">{quest.sets}x {quest.reps}</span>
         </div>
+
+        <div className="mb-4 p-3 bg-neon-blue/5 border border-neon-blue/20 rounded-lg">
+          <p className="text-neon-blue text-[11px] uppercase tracking-wider mb-1">How to do</p>
+          <p className="text-white/75 text-sm">
+            {sanitizeText(quest.executionGuide || quest.description)}
+          </p>
+        </div>
+
+        {(Array.isArray(quest.skillTags) && quest.skillTags.length > 0) || quest.skillReason ? (
+          <div className="mb-4 p-3 bg-amber-500/5 border border-amber-400/20 rounded-lg">
+            <p className="text-amber-300 text-[11px] uppercase tracking-wider mb-1">Adaptive Tags</p>
+            {Array.isArray(quest.skillTags) && quest.skillTags.length > 0 ? (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {quest.skillTags.map((tag) => (
+                  <span
+                    key={`${quest.id}-${tag}`}
+                    className="px-2 py-0.5 text-[10px] rounded border border-amber-400/30 bg-amber-400/10 text-amber-200"
+                  >
+                    {sanitizeText(tag)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {quest.skillReason ? (
+              <p className="text-amber-100/80 text-xs">{sanitizeText(quest.skillReason)}</p>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Complete button */}
         <Button
@@ -147,7 +201,9 @@ export function QuestsPage() {
   const logCheckIn = useAppStore((state) => state.logCheckIn);
   const setGymAccess = useAppStore((state) => state.setGymAccess);
   const lastCheckIn = useAppStore((state) => state.lastCheckIn);
-  const hasGymAccess = useAppStore((state) => state.hasGymAccess);
+  const hasGymAccess = useAppStore(
+    (state) => state.hasGymAccess ?? state.user?.hasGymAccess ?? null
+  );
   const user = useAppStore((state) => state.user);
 
   const [showCheckIn, setShowCheckIn] = useState(!lastCheckIn);
@@ -158,17 +214,35 @@ export function QuestsPage() {
   });
   const [trainingLog, setTrainingLog] = useState('');
   const [showTrainingLog, setShowTrainingLog] = useState(false);
+  const [isSubmittingTrainingLog, setIsSubmittingTrainingLog] = useState(false);
+  const [trainingLogFeedback, setTrainingLogFeedback] = useState<{
+    type: 'idle' | 'success' | 'error';
+    message: string;
+  }>({ type: 'idle', message: '' });
 
   useEffect(() => {
-    if (user && !showCheckIn && dailyQuests.length === 0) {
-      // Generate initial PMF quests if none exist
+    const allDailyResolved =
+      dailyQuests.length > 0 &&
+      dailyQuests.every((q) => q.status === 'completed' || q.status === 'failed');
+    const lastDailyCompletion = dailyQuests
+      .map((q) => q.completedAt)
+      .filter(Boolean)
+      .map((date) => new Date(date as string | number | Date))
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const shouldRefreshForNewDay =
+      allDailyResolved && !!lastDailyCompletion && lastDailyCompletion.getTime() < today.getTime();
+
+    if (user && !showCheckIn && (dailyQuests.length === 0 || shouldRefreshForNewDay)) {
+      // Generate initial PMF quests if none exist, or rotate to a new day
       generatePMFQuests({
         priorityPillars: ['push', 'pull', 'core'],
         painAreas: lastCheckIn?.painAreas || [],
         hasGymAccess: checkInData.hasGymAccess,
       });
     }
-  }, [user, showCheckIn, dailyQuests.length, generatePMFQuests, lastCheckIn, checkInData.hasGymAccess]);
+  }, [user, showCheckIn, dailyQuests, generatePMFQuests, lastCheckIn, checkInData.hasGymAccess]);
 
   const handleCheckIn = () => {
     logCheckIn(checkInData);
@@ -184,12 +258,37 @@ export function QuestsPage() {
   };
 
   const handleTrainingLogSubmit = async () => {
-    if (!trainingLog.trim()) return;
+    if (!trainingLog.trim() || isSubmittingTrainingLog) return;
     
     const logTrainingEntry = useAppStore.getState().logTrainingEntry;
-    await logTrainingEntry(trainingLog);
-    setTrainingLog('');
-    setShowTrainingLog(false);
+    setIsSubmittingTrainingLog(true);
+    setTrainingLogFeedback({ type: 'idle', message: '' });
+    try {
+      const result = await logTrainingEntry(trainingLog);
+      if (!result) {
+        setTrainingLogFeedback({
+          type: 'error',
+          message: 'Nao foi possivel registrar. Tente novamente.',
+        });
+        return;
+      }
+      setTrainingLogFeedback({
+        type: 'success',
+        message: 'Treino enviado e processado com sucesso.',
+      });
+      setTrainingLog('');
+      setTimeout(() => {
+        setShowTrainingLog(false);
+        setTrainingLogFeedback({ type: 'idle', message: '' });
+      }, 700);
+    } catch {
+      setTrainingLogFeedback({
+        type: 'error',
+        message: 'Erro ao enviar para IA. Verifique chave/rede.',
+      });
+    } finally {
+      setIsSubmittingTrainingLog(false);
+    }
   };
 
   if (showCheckIn) {
@@ -337,13 +436,29 @@ export function QuestsPage() {
               className="w-full h-32 bg-shadow-700 border border-white/20 rounded p-3 text-white resize-none"
             />
             <div className="flex gap-3 mt-4">
-              <Button onClick={handleTrainingLogSubmit} disabled={!trainingLog.trim()}>
-                Enviar para IA
+              <Button onClick={handleTrainingLogSubmit} disabled={!trainingLog.trim() || isSubmittingTrainingLog}>
+                {isSubmittingTrainingLog ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  'Enviar para IA'
+                )}
               </Button>
-              <Button onClick={() => setShowTrainingLog(false)} variant="secondary">
+              <Button onClick={() => setShowTrainingLog(false)} variant="secondary" disabled={isSubmittingTrainingLog}>
                 Cancelar
               </Button>
             </div>
+            {trainingLogFeedback.type !== 'idle' && (
+              <p
+                className={`mt-3 text-xs ${
+                  trainingLogFeedback.type === 'success' ? 'text-green-400' : 'text-red-400'
+                }`}
+              >
+                {trainingLogFeedback.message}
+              </p>
+            )}
           </motion.div>
         </motion.div>
       )}

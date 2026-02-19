@@ -26,7 +26,20 @@ import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/CyberFrame';
 import { AssessmentChat } from '@/components/ui';
 import { useAppStore } from '@/store/useAppStore';
-import type { Objective, FitnessLevel } from '@/types';
+import type {
+  Objective,
+  FitnessLevel,
+  MovementPillar,
+  PillarLevel,
+  Equipment,
+  EquipmentCategory,
+  UserStats,
+  RadarStats,
+  Rank,
+  UserSkill,
+} from '@/types';
+import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
+import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog } from '@/lib/equipmentCatalog';
 
 interface AssessmentData {
   height: number;
@@ -34,6 +47,8 @@ interface AssessmentData {
   age: number;
   objective: Objective | null;
   fitnessLevel: FitnessLevel | null;
+  hasGymAccess: boolean | null;
+  equipmentNotes: string;
   pushTest: number;
   pullTest: number;
   coreTest: number;
@@ -54,6 +69,302 @@ const fitnessLevels: { value: FitnessLevel; label: string; description: string }
   { value: 'advanced', label: 'Avançado', description: 'Mais de 2 anos de treino' },
 ];
 
+
+const parseEquipmentInput = (input: string) =>
+  Array.from(
+    new Set(
+      input
+        .split(/[\n,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+
+const EQUIPMENT_CATEGORIES: EquipmentCategory[] = [
+  'free-weight',
+  'barbell',
+  'machine',
+  'cable',
+  'bodyweight',
+  'cardio',
+  'accessory',
+  'other',
+];
+
+const parseEquipmentCategory = (value: unknown): EquipmentCategory | undefined => {
+  if (typeof value !== 'string') return undefined;
+  return EQUIPMENT_CATEGORIES.includes(value as EquipmentCategory)
+    ? (value as EquipmentCategory)
+    : undefined;
+};
+
+const buildAssessmentEquipmentCatalog = (aiCatalog: unknown, parsedEquipment: string[]): Equipment[] => {
+  const aiItems = Array.isArray(aiCatalog)
+    ? aiCatalog.map((item) => {
+        if (!item || typeof item !== 'object') return {};
+        const candidate = item as Record<string, unknown>;
+        return {
+          id: typeof candidate.id === 'string' ? candidate.id : undefined,
+          name: typeof candidate.name === 'string' ? candidate.name : undefined,
+          category: parseEquipmentCategory(candidate.category),
+          notes: typeof candidate.notes === 'string' ? candidate.notes : undefined,
+          enabledForAI:
+            typeof candidate.enabledForAI === 'boolean' ? candidate.enabledForAI : true,
+          source: 'assessment-ai' as const,
+        };
+      })
+    : [];
+
+  const normalized = normalizeEquipmentCatalog(aiItems, parsedEquipment);
+  if (normalized.length > 0) return normalized;
+  return buildEquipmentCatalogFromNames(parsedEquipment, 'assessment-ai');
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, Math.round(value)));
+
+const getExperienceBonus = (fitnessLevel: FitnessLevel) => {
+  if (fitnessLevel === 'advanced') return 8;
+  if (fitnessLevel === 'intermediate') return 4;
+  return 0;
+};
+
+const getFitnessStatCap = (fitnessLevel: FitnessLevel) => {
+  if (fitnessLevel === 'advanced') return 90;
+  if (fitnessLevel === 'intermediate') return 70;
+  return 45;
+};
+
+const buildBaselineStats = (assessmentData: AssessmentData): UserStats => {
+  const fitnessLevel = assessmentData.fitnessLevel || 'beginner';
+  const expBonus = getExperienceBonus(fitnessLevel);
+  const statCap = getFitnessStatCap(fitnessLevel);
+  const push = clamp(6 + assessmentData.pushTest * 1.2 + expBonus, 5, statCap);
+  const pull = clamp(5 + assessmentData.pullTest * 2.2 + expBonus, 5, statCap);
+  const legs = clamp(8 + assessmentData.legsTest * 0.8 + expBonus, 5, statCap);
+  const core = clamp(6 + assessmentData.coreTest * 0.35 + expBonus, 5, statCap);
+  const endurance = clamp((legs + core) / 2, 5, statCap);
+  const mobility = clamp(12 + expBonus * 0.8, 5, statCap);
+  return { push, pull, legs, core, endurance, mobility };
+};
+
+const mergeAIStats = (baseline: UserStats, aiStats: any): UserStats => {
+  const keys: Array<keyof UserStats> = ['push', 'pull', 'legs', 'core', 'endurance', 'mobility'];
+  const merged = { ...baseline };
+  for (const key of keys) {
+    const aiValue = Number(aiStats?.[key]);
+    if (!Number.isFinite(aiValue)) continue;
+    const aiClamped = clamp(aiValue, 1, 100);
+    const delta = Math.abs(aiClamped - baseline[key]);
+    if (delta > 25) continue;
+    merged[key] = clamp(baseline[key] * 0.75 + aiClamped * 0.25, 1, 100);
+  }
+  return merged;
+};
+
+const buildRadarFromStats = (stats: UserStats): RadarStats => ({
+  force: clamp((stats.push + stats.legs) / 2, 1, 100),
+  explosion: clamp((stats.push + stats.pull + stats.legs) / 3, 1, 100),
+  resistance: clamp((stats.endurance + stats.core) / 2, 1, 100),
+  mobility: clamp(stats.mobility, 1, 100),
+  mechanics: clamp((stats.pull + stats.core + stats.mobility) / 3, 1, 100),
+  coordination: clamp((stats.core + stats.mobility + stats.endurance) / 3, 1, 100),
+});
+
+const mergeAIRadar = (baseline: RadarStats, aiRadar: any): RadarStats => {
+  const keys: Array<keyof RadarStats> = [
+    'force',
+    'explosion',
+    'resistance',
+    'mobility',
+    'mechanics',
+    'coordination',
+  ];
+  const merged = { ...baseline };
+  for (const key of keys) {
+    const aiValue = Number(aiRadar?.[key]);
+    if (!Number.isFinite(aiValue)) continue;
+    const aiClamped = clamp(aiValue, 1, 100);
+    const delta = Math.abs(aiClamped - baseline[key]);
+    if (delta > 25) continue;
+    merged[key] = clamp(baseline[key] * 0.7 + aiClamped * 0.3, 1, 100);
+  }
+  return merged;
+};
+
+const parseRank = (value: unknown, fallback: Rank = 'E'): Rank => {
+  if (value === 'E' || value === 'D' || value === 'C' || value === 'B' || value === 'A' || value === 'S') {
+    return value;
+  }
+  return fallback;
+};
+
+const resolveFallbackRank = (fitnessLevel: FitnessLevel): Rank => {
+  if (fitnessLevel === 'advanced') return 'C';
+  if (fitnessLevel === 'intermediate') return 'D';
+  return 'E';
+};
+
+const resolvePillarXpToNext = (level: number) => {
+  if (level <= 0) return 100;
+  return Math.max(100, Math.floor(150 * Math.pow(1.2, level)));
+};
+
+const determineStrengthPillarInitialLevel = (
+  pillar: 'push' | 'pull' | 'core' | 'legs',
+  performance: number,
+  fitnessLevel: FitnessLevel
+) => {
+  const thresholds = {
+    push: [12, 28, 45],
+    pull: [4, 10, 18],
+    core: [35, 80, 140],
+    legs: [20, 45, 75],
+  } as const;
+
+  const [levelOneThreshold, levelTwoThreshold, levelThreeThreshold] = thresholds[pillar];
+  let level = fitnessLevel === 'advanced' ? 1 : 0;
+
+  if (performance >= levelOneThreshold) level = Math.max(level, 1);
+  if (fitnessLevel !== 'beginner' && performance >= levelTwoThreshold) level = Math.max(level, 2);
+  if (fitnessLevel === 'advanced' && performance >= levelThreeThreshold) level = Math.max(level, 3);
+
+  return Math.max(0, Math.min(3, level));
+};
+
+const determineMobilityOrEnduranceLevel = (
+  pillar: 'mobility' | 'endurance',
+  assessmentData: AssessmentData
+) => {
+  const fitnessLevel = assessmentData.fitnessLevel || 'beginner';
+  let level = fitnessLevel === 'beginner' ? 0 : fitnessLevel === 'intermediate' ? 1 : 2;
+
+  const hasHighVolumeProfile =
+    (assessmentData.availableTime || 45) >= 60 && (assessmentData.trainingFrequency || 3) >= 5;
+  const hasStrongPerformanceSignal =
+    pillar === 'mobility' ? assessmentData.coreTest >= 90 : assessmentData.legsTest >= 60;
+
+  if (fitnessLevel !== 'beginner' && (hasHighVolumeProfile || hasStrongPerformanceSignal)) {
+    level += 1;
+  }
+
+  return Math.max(0, Math.min(3, level));
+};
+
+const buildInitialPillarLevels = (
+  assessmentData: AssessmentData
+): Record<MovementPillar, PillarLevel> => {
+  const fitnessLevel = assessmentData.fitnessLevel || 'beginner';
+  const pushLevel = determineStrengthPillarInitialLevel('push', assessmentData.pushTest, fitnessLevel);
+  const pullLevel = determineStrengthPillarInitialLevel('pull', assessmentData.pullTest, fitnessLevel);
+  const coreLevel = determineStrengthPillarInitialLevel('core', assessmentData.coreTest, fitnessLevel);
+  const legsLevel = determineStrengthPillarInitialLevel('legs', assessmentData.legsTest, fitnessLevel);
+  const mobilityLevel = determineMobilityOrEnduranceLevel('mobility', assessmentData);
+  const enduranceLevel = determineMobilityOrEnduranceLevel('endurance', assessmentData);
+
+  return {
+    push: {
+      pillar: 'push',
+      level: pushLevel,
+      xp: 0,
+      xpToNext: resolvePillarXpToNext(pushLevel),
+      unlockedSkills: [],
+    },
+    pull: {
+      pillar: 'pull',
+      level: pullLevel,
+      xp: 0,
+      xpToNext: resolvePillarXpToNext(pullLevel),
+      unlockedSkills: [],
+    },
+    core: {
+      pillar: 'core',
+      level: coreLevel,
+      xp: 0,
+      xpToNext: resolvePillarXpToNext(coreLevel),
+      unlockedSkills: [],
+    },
+    legs: {
+      pillar: 'legs',
+      level: legsLevel,
+      xp: 0,
+      xpToNext: resolvePillarXpToNext(legsLevel),
+      unlockedSkills: [],
+    },
+    mobility: {
+      pillar: 'mobility',
+      level: mobilityLevel,
+      xp: 0,
+      xpToNext: resolvePillarXpToNext(mobilityLevel),
+      unlockedSkills: [],
+    },
+    endurance: {
+      pillar: 'endurance',
+      level: enduranceLevel,
+      xp: 0,
+      xpToNext: resolvePillarXpToNext(enduranceLevel),
+      unlockedSkills: [],
+    },
+  };
+};
+
+const resolveCurrentLevelUnlockCount = (
+  pillar: MovementPillar,
+  level: number,
+  assessmentData: AssessmentData
+) => {
+  const skillsInLevel = SKILL_DEFINITIONS[pillar]?.[level] || [];
+  if (skillsInLevel.length === 0) return 0;
+
+  const fitnessLevel = assessmentData.fitnessLevel || 'beginner';
+  let count = level === 0 ? 2 : 3;
+  if (fitnessLevel === 'intermediate') count += 1;
+  if (fitnessLevel === 'advanced') count += 2;
+
+  if (pillar === 'push' && assessmentData.pushTest >= 25) count += 1;
+  if (pillar === 'pull' && assessmentData.pullTest >= 8) count += 1;
+  if (pillar === 'core' && assessmentData.coreTest >= 60) count += 1;
+  if (pillar === 'legs' && assessmentData.legsTest >= 35) count += 1;
+  if ((pillar === 'mobility' || pillar === 'endurance') && (assessmentData.trainingFrequency || 3) >= 5) {
+    count += 1;
+  }
+
+  return Math.max(2, Math.min(skillsInLevel.length, count));
+};
+
+const buildInitialUserSkills = (
+  pillarLevels: Record<MovementPillar, PillarLevel>,
+  assessmentData: AssessmentData
+) => {
+  const userSkills: Record<string, UserSkill> = {};
+
+  for (const pillar of Object.keys(pillarLevels) as MovementPillar[]) {
+    const levelData = pillarLevels[pillar];
+    const unlockedIds: string[] = [];
+
+    for (let level = 0; level <= levelData.level; level++) {
+      const skillsForLevel = SKILL_DEFINITIONS[pillar]?.[level] || [];
+      const unlockLimit =
+        level < levelData.level
+          ? skillsForLevel.length
+          : resolveCurrentLevelUnlockCount(pillar, level, assessmentData);
+
+      for (const skill of skillsForLevel.slice(0, unlockLimit)) {
+        userSkills[skill.id] = {
+          skillId: skill.id,
+          unlocked: true,
+          unlockedAt: new Date(),
+          masteryLevel: 0,
+        };
+        unlockedIds.push(skill.id);
+      }
+    }
+
+    levelData.unlockedSkills = Array.from(new Set(unlockedIds));
+  }
+
+  return userSkills;
+};
 
 function AssessmentTimer({ onFinish, label, defaultMode = 'stopwatch' }: { onFinish: (value: number) => void, label: string, defaultMode?: 'stopwatch' | 'counter' }) {
   const [isActive, setIsActive] = useState(false);
@@ -189,6 +500,8 @@ export function HunterAssessment() {
     age: 25,
     objective: 'gain-muscle', // Defaulted, hidden from user
     fitnessLevel: null,
+    hasGymAccess: null,
+    equipmentNotes: '',
     pushTest: 0,
     pullTest: 0,
     coreTest: 0,
@@ -206,25 +519,27 @@ export function HunterAssessment() {
   
   const geminiApiKey = useAppStore((state) => state.geminiApiKey);
   const setGeminiApiKey = useAppStore((state) => state.setGeminiApiKey);
+  const setAvailableEquipment = useAppStore((state) => state.setAvailableEquipment);
 
   const setScreen = useAppStore((state) => state.setScreen);
   const initializeUser = useAppStore((state) => state.initializeUser);
 
   // Extended steps for individual exercises
   // 0: Data
-  // 1: Experience (Was Objective)
-  // 2: Time Availability (New!)
-  // 3: Pushups
-  // 4: Pullups
-  // 5: Squats
-  // 6: Plank
-  // 7: Chat
-  const totalSteps = 8;
+  // 1: Experience
+  // 2: Gym + Equipment
+  // 3: Time Availability
+  // 4: Pushups
+  // 5: Pullups
+  // 6: Squats
+  // 7: Plank
+  // 8: Chat
+  const totalSteps = 9;
 
   const handleNext = () => {
     if (step < totalSteps - 1) {
-      // Before entering Chat (Step 7), ensure API Key
-      if (step === 6 && !geminiApiKey) {
+      // Before entering Chat (Step 8), ensure API Key
+      if (step === 7 && !geminiApiKey) {
           setShowApiKeyModal(true);
           return;
       }
@@ -257,6 +572,8 @@ export function HunterAssessment() {
   const handleComplete = async (overrideBio?: string, overrideKey?: string) => {
     const finalBio = overrideBio ?? bioInfo;
     const activeKey = overrideKey || geminiApiKey;
+    const parsedEquipment = parseEquipmentInput(data.equipmentNotes);
+    setAvailableEquipment(parsedEquipment);
 
     if (!activeKey) {
         setShowApiKeyModal(true);
@@ -266,17 +583,27 @@ export function HunterAssessment() {
     if (!data.fitnessLevel) {
        // Fallback logic
        console.error("Missing Data");
+       const fallbackData: AssessmentData = { ...data, fitnessLevel: 'beginner' };
+       const fallbackPillarLevels = buildInitialPillarLevels(fallbackData);
+       const fallbackUserSkills = buildInitialUserSkills(fallbackPillarLevels, fallbackData);
+       const fallbackStats = buildBaselineStats(fallbackData);
+       const fallbackEquipmentCatalog = buildEquipmentCatalogFromNames(parsedEquipment, 'assessment-ai');
+
        initializeUser({
-         name: sessionStorage.getItem('tempHunterName') || 'Hunter',
-         rank: 'E',
+         name: sessionStorage.getItem('tempHunterName') || 'User',
+         rank: resolveFallbackRank('beginner'),
          height: data.height,
          weight: data.weight,
          age: data.age,
          objective: 'gain-muscle',
-         fitnessLevel: data.fitnessLevel!,
-         stats: undefined,
-         radarStats: undefined,
-         movementProgress: undefined,
+         fitnessLevel: 'beginner',
+         stats: fallbackStats,
+         radarStats: buildRadarFromStats(fallbackStats),
+         pillarLevels: fallbackPillarLevels,
+         userSkills: fallbackUserSkills,
+         hasGymAccess: data.hasGymAccess ?? false,
+         availableEquipment: parsedEquipment,
+         equipmentCatalog: fallbackEquipmentCatalog,
          availableTime: data.availableTime,
          trainingFrequency: data.trainingFrequency
        });
@@ -284,30 +611,45 @@ export function HunterAssessment() {
        return;
     }
 
+    const fallbackFitnessLevel = data.fitnessLevel;
+    const fallbackRank = resolveFallbackRank(fallbackFitnessLevel);
+    const fallbackStats = buildBaselineStats(data);
+    const fallbackRadarStats = buildRadarFromStats(fallbackStats);
+    const fallbackPillarLevels = buildInitialPillarLevels(data);
+    const fallbackUserSkills = buildInitialUserSkills(fallbackPillarLevels, data);
+    const fallbackEquipmentCatalog = buildEquipmentCatalogFromNames(parsedEquipment, 'assessment-ai');
+
     setIsSyncing(true);
 
     try {
       const prompt = `
-      DADOS FÍSICOS:
+      DADOS FISICOS:
       Altura: ${data.height}cm, Peso: ${data.weight}kg, Idade: ${data.age}
-      Objetivo: PROGRESSÃO DE MOVIMENTO FUNCIONAL (Strength/Skill)
-      Tempo Disponível Diário: ${data.availableTime} minutos
-      Frequência Semanal: ${data.trainingFrequency || 3} dias/semana
-      Experiência: ${data.fitnessLevel}
-      
-      TESTE FÍSICO (Performance):
-      Push (Flexão): ${data.pushTest} reps
+      Objetivo: PROGRESSAO DE MOVIMENTO FUNCIONAL (Strength/Skill)
+      Tempo Disponivel Diario: ${data.availableTime} minutos
+      Frequencia Semanal: ${data.trainingFrequency || 3} dias/semana
+      Experiencia: ${data.fitnessLevel}
+
+      TESTE FISICO (Performance):
+      Push (Flexao): ${data.pushTest} reps
       Pull (Barra): ${data.pullTest} reps
       Legs (Agachamento): ${data.legsTest} reps
       Core (Prancha): ${data.coreTest} segundos
-      
-      RELATO DO USUÁRIO (Sensações/Técnica):
+
+      EQUIPAMENTOS DISPONIVEIS INFORMADOS PELO USUARIO:
+      ${parsedEquipment.length ? parsedEquipment.join(', ') : 'nenhum'}
+
+      RELATO DO USUARIO (Sensacoes/Tecnica):
       "${testFeedback}"
-      
-      INFORMAÇÕES ADICIONAIS (Bio/Histórico):
+
+      INFORMACOES ADICIONAIS (Bio/Historico):
       "${finalBio}"
-      
-      IMPORTANTE: Analise o texto acima em busca de lesões, dores ou limitações. Se encontrar (ex: dor no ombro, joelho estalando), GERE UM DEBUFF na resposta.
+
+      IMPORTANTE:
+      - Analise o texto acima em busca de lesoes, dores ou limitacoes. Se encontrar (ex: dor no ombro), gere debuffs.
+      - Gere equipmentCatalog normalizado com os equipamentos informados.
+      - Categorias permitidas: free-weight, barbell, machine, cable, bodyweight, cardio, accessory e other.
+      - Marque enabledForAI=true para equipamentos realmente utilizaveis.
       `;
 
       const response = await fetch('/api/gemini', {
@@ -322,25 +664,30 @@ export function HunterAssessment() {
 
       const result = await response.json();
       const assessment = JSON.parse(result.response);
+      const equipmentCatalog = buildAssessmentEquipmentCatalog(
+        assessment?.equipmentCatalog,
+        parsedEquipment
+      );
+      const calibratedStats = mergeAIStats(fallbackStats, assessment?.stats);
+      const baselineRadarFromCalibratedStats = buildRadarFromStats(calibratedStats);
+      const calibratedRadar = mergeAIRadar(baselineRadarFromCalibratedStats, assessment?.radarStats);
+      const resolvedRank = parseRank(assessment?.rank, fallbackRank);
 
       initializeUser({
-        name: sessionStorage.getItem('tempHunterName') || 'Hunter',
-        rank: assessment.rank,
+        name: sessionStorage.getItem('tempHunterName') || 'User',
+        rank: resolvedRank,
         height: data.height,
         weight: data.weight,
         age: data.age,
         objective: data.objective!,
         fitnessLevel: data.fitnessLevel!,
-        stats: assessment.stats,
-        radarStats: assessment.radarStats,
-        movementProgress: Object.fromEntries(
-            Object.entries(assessment.movementLevels).map(([k, v]) => [k, { 
-                pillar: k, 
-                level: v, 
-                xp: 0, 
-                xpToNext: 100 * (Number(v) || 1) 
-            }])
-        ) as any,
+        stats: calibratedStats,
+        radarStats: calibratedRadar,
+        pillarLevels: fallbackPillarLevels,
+        userSkills: fallbackUserSkills,
+        hasGymAccess: data.hasGymAccess!,
+        availableEquipment: parsedEquipment,
+        equipmentCatalog,
         bioData: assessment.bioSummary,
         availableTime: data.availableTime,
         trainingFrequency: data.trainingFrequency,
@@ -355,15 +702,21 @@ export function HunterAssessment() {
 
     } catch (error) {
       console.error("Gemini Assessment Failed", error);
-      // Fallback
       initializeUser({
-         name: sessionStorage.getItem('tempHunterName') || 'Hunter',
-         rank: 'E',
+         name: sessionStorage.getItem('tempHunterName') || 'User',
+         rank: fallbackRank,
          height: data.height,
          weight: data.weight,
          age: data.age,
          objective: data.objective!,
          fitnessLevel: data.fitnessLevel!,
+         stats: fallbackStats,
+         radarStats: fallbackRadarStats,
+         pillarLevels: fallbackPillarLevels,
+         userSkills: fallbackUserSkills,
+         hasGymAccess: data.hasGymAccess ?? false,
+         availableEquipment: parsedEquipment,
+         equipmentCatalog: fallbackEquipmentCatalog,
          availableTime: data.availableTime,
          trainingFrequency: data.trainingFrequency,
          debuffs: []
@@ -380,17 +733,19 @@ export function HunterAssessment() {
         return data.height > 0 && data.weight > 0 && data.age > 0;
       case 1: // Fitness Level
         return data.fitnessLevel !== null;
-      case 2: // Available Time
+      case 2: // Gym Access
+        return data.hasGymAccess !== null;
+      case 3: // Available Time
         return data.availableTime >= 10;
-      case 3: // Pushups
+      case 4: // Pushups
         return data.pushTest > 0;
-      case 4: // Pullups
+      case 5: // Pullups
         return true; 
-      case 5: // Squats
+      case 6: // Squats
         return data.legsTest > 0;
-      case 6: // Core
+      case 7: // Core
         return data.coreTest > 0;
-      case 7: // Chat
+      case 8: // Chat
         return true; 
       default:
         return false;
@@ -418,7 +773,7 @@ export function HunterAssessment() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-neon-blue/10 border border-neon-blue/30 mb-4">
             <Activity className="w-4 h-4 text-neon-blue" />
-            <span className="text-neon-blue font-mono text-sm">HUNTER ASSESSMENT</span>
+            <span className="text-neon-blue font-mono text-sm">ASSESSMENT</span>
           </div>
           <h1 className="font-display text-3xl font-bold gradient-text mb-2">
             AVALIAÇÃO FÍSICA
@@ -535,8 +890,73 @@ export function HunterAssessment() {
               </motion.div>
             )}
 
-            {/* Step 2: Available Time */}
+            {/* Step 2: Gym Access */}
             {step === 2 && (
+              <motion.div
+                key="step-2-gym"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="text-center mb-6">
+                  <Dumbbell className="w-12 h-12 mx-auto text-neon-blue mb-2" />
+                  <h2 className="font-display text-xl text-white">ACESSO À ACADEMIA</h2>
+                  <p className="text-white/40 text-sm">Você tem acesso a equipamentos de academia?</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <motion.button
+                    onClick={() => setData({ ...data, hasGymAccess: true })}
+                    className={`p-6 border-2 transition-all text-center ${
+                      data.hasGymAccess === true
+                        ? 'border-neon-blue bg-neon-blue/10'
+                        : 'border-white/10 bg-shadow-800 hover:border-white/20'
+                    }`}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <Dumbbell className="w-8 h-8 mx-auto mb-2 text-green-400" />
+                    <h3 className={`font-display text-lg ${
+                      data.hasGymAccess === true ? 'text-neon-blue' : 'text-white'
+                    }`}>Sim</h3>
+                    <p className="text-white/40 text-sm">Tenho acesso completo</p>
+                  </motion.button>
+
+                  <motion.button
+                    onClick={() => setData({ ...data, hasGymAccess: false })}
+                    className={`p-6 border-2 transition-all text-center ${
+                      data.hasGymAccess === false
+                        ? 'border-neon-blue bg-neon-blue/10'
+                        : 'border-white/10 bg-shadow-800 hover:border-white/20'
+                    }`}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <User className="w-8 h-8 mx-auto mb-2 text-orange-400" />
+                    <h3 className={`font-display text-lg ${
+                      data.hasGymAccess === false ? 'text-neon-blue' : 'text-white'
+                    }`}>Não</h3>
+                    <p className="text-white/40 text-sm">Calistenia apenas</p>
+                  </motion.button>
+                </div>
+
+                <div className="mt-2">
+                  <label className="block text-white/60 text-sm mb-2">
+                    Liste os equipamentos que voce realmente tem (separados por virgula)
+                  </label>
+                  <textarea
+                    value={data.equipmentNotes}
+                    onChange={(e) => setData({ ...data, equipmentNotes: e.target.value })}
+                    placeholder="Ex: halteres, barra, anilhas, banco, roldana, kettlebell"
+                    className="w-full min-h-24 px-4 py-3 bg-shadow-800 border border-white/10 text-white text-sm focus:border-neon-blue focus:outline-none transition-colors resize-y"
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {/* Step 3: Available Time */}
+            {step === 3 && (
               <motion.div
                 key="step-2-time"
                 initial={{ opacity: 0, x: 20 }}
@@ -594,8 +1014,8 @@ export function HunterAssessment() {
               </motion.div>
             )}
 
-            {/* Step 3: Push Ups */}
-            {step === 3 && (
+            {/* Step 4: Push Ups */}
+            {step === 4 && (
               <motion.div
                 key="step-3-push"
                 initial={{ opacity: 0, x: 20 }}
@@ -622,8 +1042,8 @@ export function HunterAssessment() {
               </motion.div>
             )}
 
-            {/* Step 4: Pull Ups */}
-            {step === 4 && (
+            {/* Step 5: Pull Ups */}
+            {step === 5 && (
               <motion.div
                 key="step-4-pull"
                 initial={{ opacity: 0, x: 20 }}
@@ -660,8 +1080,8 @@ export function HunterAssessment() {
               </motion.div>
             )}
 
-            {/* Step 5: Squats */}
-            {step === 5 && (
+            {/* Step 6: Squats */}
+            {step === 6 && (
               <motion.div
                 key="step-5-legs"
                 initial={{ opacity: 0, x: 20 }}
@@ -688,8 +1108,8 @@ export function HunterAssessment() {
               </motion.div>
             )}
 
-            {/* Step 6: Core */}
-            {step === 6 && (
+            {/* Step 7: Core */}
+            {step === 7 && (
               <motion.div
                 key="step-6-core"
                 initial={{ opacity: 0, x: 20 }}
@@ -716,8 +1136,8 @@ export function HunterAssessment() {
               </motion.div>
             )}
 
-            {/* Step 7: Reviews (Chat Interactive) */}
-            {step === 7 && (
+            {/* Step 8: Reviews (Chat Interactive) */}
+            {step === 8 && (
               <motion.div
                 key="step-7-chat"
                 initial={{ opacity: 0, x: 20 }}
@@ -796,7 +1216,7 @@ export function HunterAssessment() {
                     </div>
                     
                     <p className="text-white/70 text-sm mb-4">
-                        Para processar sua avaliação física e gerar seu Protocolo Hunter, o sistema precisa de acesso ao núcleo Gemini IA.
+                        Para processar sua avaliação física e gerar seu protocolo APEXSYS, o sistema precisa de acesso ao núcleo Gemini IA.
                     </p>
 
                     <input 
@@ -822,3 +1242,4 @@ export function HunterAssessment() {
     </div>
   );
 }
+

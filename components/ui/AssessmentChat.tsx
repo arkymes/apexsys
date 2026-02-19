@@ -54,19 +54,26 @@ export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
                 ${JSON.stringify(context, null, 2)}
                 
                 SEU OBJETIVO:
-                1. Analisar os dados físicos já coletados.
-                2. Fazer 2 ou 3 perguntas estratégicas e curtas para entender o perfil psicológico ou histórico de lesões do usuário, caso não esteja claro.
+                1. Analisar os dados físicos já coletados silenciosamente (não mostrar análise detalhada ao usuário).
+                2. Fazer APENAS UMA pergunta por vez para entender o perfil psicológico ou histórico de lesões do usuário, caso não esteja claro.
                 3. Manter o tom imersivo de "Sistema".
+                4. Após cada resposta do usuário, fazer a próxima pergunta relevante ou finalizar se tiver dados suficientes.
                 
                 QUANDO FINALIZAR:
                 Se você sentir que tem dados suficientes, agradeça e finalize dizendo a palavra-chave "TERMINAL_LOCK".
+                
+                IMPORTANTE: 
+                - Sempre faça apenas uma pergunta por resposta.
+                - Não liste múltiplas perguntas de uma vez.
+                - Não mostre análises longas ou dumps de informação.
+                - Seja conciso e direto.
             `,
             temperature: 0.7,
         }
     });
 
     try {
-        const result = await chatInstance.current.sendMessage({ message: "Inicie o protocolo de entrevista." });
+        const result = await chatInstance.current.sendMessage({ message: "Analise os dados coletados e faça a primeira pergunta relevante sobre o perfil do usuário." });
         setMessages([{
             id: 'init',
             role: 'model',
@@ -94,10 +101,11 @@ export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text }]);
         
         // Append context for final bio
-        setSessionData(prev => `${prev}\nUser: ${userText}\nSystem: ${text}`);
+        const updatedSessionData = `${sessionData}\nUser: ${userText}\nSystem: ${text}`;
+        setSessionData(updatedSessionData);
 
         if (text.includes("TERMINAL_LOCK")) {
-            onComplete(sessionData);
+            onComplete(updatedSessionData);
         }
 
     } catch (e) {

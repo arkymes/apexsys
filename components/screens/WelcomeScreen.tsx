@@ -10,7 +10,7 @@ export function WelcomeScreen() {
   const setScreen = useAppStore((state) => state.setScreen);
 
   useEffect(() => {
-    const name = sessionStorage.getItem('tempHunterName') || 'Hunter';
+    const name = sessionStorage.getItem('tempHunterName') || 'User';
     setHunterName(name);
 
     // Show welcome text after brief delay
@@ -58,7 +58,7 @@ export function WelcomeScreen() {
             transition={{ delay: 0.4, duration: 0.5 }}
             className="font-display text-4xl md:text-6xl font-bold text-white mb-4 text-glow-strong"
           >
-            Welcome, Hunter
+            Welcome
           </motion.h1>
           
           <motion.p

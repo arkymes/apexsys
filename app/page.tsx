@@ -18,10 +18,20 @@ export default function Home() {
   const currentScreen = useAppStore((state) => state.currentScreen);
   const user = useAppStore((state) => state.user);
   const particlesEnabled = useAppStore((state) => state.particlesEnabled);
+  const setScreen = useAppStore((state) => state.setScreen);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const shouldAutoRouteToDashboard =
+      currentScreen === 'awakening' || currentScreen === 'welcome' || currentScreen === 'assessment';
+    if (user && shouldAutoRouteToDashboard) {
+      setScreen('dashboard');
+    }
+  }, [mounted, user, currentScreen, setScreen]);
 
   if (!mounted) {
     return (

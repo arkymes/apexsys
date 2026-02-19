@@ -63,7 +63,6 @@ export function SystemAwakening() {
   const handleSubmitName = () => {
     if (!hunterName.trim()) return;
     sessionStorage.setItem('tempHunterName', hunterName);
-    sessionStorage.setItem('tempHunterRank', 'D');
     setScreen('welcome');
   };
 
@@ -140,10 +139,8 @@ export function SystemAwakening() {
             {/* Content */}
             <div className="p-8 text-center">
               <p className="text-white text-lg mb-2 font-body">
-                If you don&apos;t accept, your heart will stop in{' '}
-                <span className="countdown-timer text-2xl">
-                  {countdown} seconds
-                </span>
+                System access request expires in{' '}
+                <span className="countdown-timer text-2xl">{countdown} seconds</span>
               </p>
               <p className="text-white/90 text-lg mt-6 font-body">
                 Do you want to accept ?
@@ -256,15 +253,14 @@ export function SystemAwakening() {
                 <AlertCircle className="w-6 h-6 text-white/80" />
               </div>
               <h2 className="font-display text-xl tracking-wider text-white font-bold">
-                HUNTER REGISTRATION
+                PROFILE REGISTRATION
               </h2>
             </div>
 
             {/* Content */}
             <div className="p-8">
               <p className="text-white/80 text-center mb-6 font-body">
-                [SYSTEM] Player has been registered as a{' '}
-                <span className="text-neon-cyan font-semibold">HUNTER</span>
+                [SYSTEM] User profile registered in APEXSYS
               </p>
               
               <p className="text-white/60 text-sm mb-2 font-display uppercase tracking-wider">
@@ -276,7 +272,7 @@ export function SystemAwakening() {
                 value={hunterName}
                 onChange={(e) => setHunterName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSubmitName()}
-                placeholder="Hunter Name"
+                placeholder="Your name"
                 autoFocus
                 className="input-cyber w-full text-lg"
               />

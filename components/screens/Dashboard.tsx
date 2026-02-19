@@ -56,7 +56,7 @@ export function Dashboard() {
 
             {/* Level */}
             <div className="text-center mb-6">
-              <span className="text-white/60 font-display text-sm uppercase tracking-wider">Hunter Level</span>
+              <span className="text-white/60 font-display text-sm uppercase tracking-wider">Level</span>
               <div className="level-display">LV.{user.level}</div>
             </div>
 
@@ -128,7 +128,7 @@ export function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`font-display font-semibold ${quest.status === 'completed' ? 'text-white/50 line-through' : 'text-white'}`}>
-                        {quest.name} ({quest.sets}×{quest.reps})
+                        {quest.name} ({quest.sets}x{quest.reps})
                       </span>
                     </div>
                     <p className="text-white/50 text-sm font-body">{quest.description}</p>

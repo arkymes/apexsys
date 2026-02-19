@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { MessageSquare } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { SystemChatPanel } from '@/components/ui';
+import { ApexsysLogo } from '@/components/ui/ApexsysLogo';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -36,13 +37,9 @@ export function Navigation() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-2">
-            <motion.span
-              className="font-display text-xl font-bold tracking-wider text-white"
-              style={{ textShadow: '0 0 20px rgba(0, 212, 255, 0.5)' }}
-              whileHover={{ textShadow: '0 0 30px rgba(0, 212, 255, 0.8)' }}
-            >
-              SHADOW GYM
-            </motion.span>
+            <motion.div whileHover={{ scale: 1.02 }}>
+              <ApexsysLogo />
+            </motion.div>
           </Link>
 
           {/* Nav Items */}
