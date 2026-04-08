@@ -9,6 +9,7 @@ import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
 import { sanitizeText } from '@/lib/textSanitizer';
 import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
 import { getInvisibleSkillHowTo } from '@/lib/skillHowTo';
+import { recordApiCall } from '@/lib/engineUsageTracker';
 
 const mapPillarToStat = (pillar?: string) => {
   switch (pillar) {
@@ -323,6 +324,7 @@ RULES:
     });
 
     const data = await response.json();
+    recordApiCall();
     if (data.error) throw new Error(data.error);
 
     const result = JSON.parse(data.response);

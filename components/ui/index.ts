@@ -8,3 +8,5 @@ export { Input, SelectButtons } from './Input';
 export { LoadingSpinner, AnalyzingLoader, SystemBoot } from './Loading';
 export { SystemChatPanel } from './SystemChatPanel';
 export { AssessmentChat } from './AssessmentChat';
+export { VideoFormAnalysis } from './VideoFormAnalysis';
+export { EngineHeatBar } from './EngineHeatBar';

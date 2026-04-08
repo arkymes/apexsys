@@ -13,12 +13,15 @@ import {
   Move,
   Moon,
   Zap,
-  MessageSquare
+  MessageSquare,
+  Video
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { VideoFormAnalysis } from '@/components/ui/VideoFormAnalysis';
 import { useAppStore } from '@/store/useAppStore';
 import type { Quest } from '@/types';
 import { sanitizeText } from '@/lib/textSanitizer';
+import { useMemo } from 'react';
 
 const difficultyColors = {
   easy: '#22c55e',
@@ -47,12 +50,15 @@ const pillarIcons = {
 interface QuestCardProps {
   quest: Quest;
   onComplete: () => void;
+  weeklyProgress?: { current: number; target: number };
 }
 
-function QuestCard({ quest, onComplete }: QuestCardProps) {
+function QuestCard({ quest, onComplete, weeklyProgress }: QuestCardProps) {
   const isCompleted = quest.status === 'completed';
   const PillarIcon = pillarIcons[quest.pillar] || Dumbbell;
   const pillarColor = pillarColors[quest.pillar] || '#00d4ff';
+  const [showVideoAnalysis, setShowVideoAnalysis] = useState(false);
+  const isWeekly = quest.type === 'weekly';
 
   return (
     <motion.div
@@ -167,22 +173,82 @@ function QuestCard({ quest, onComplete }: QuestCardProps) {
           </div>
         ) : null}
 
-        {/* Complete button */}
-        <Button
-          onClick={onComplete}
-          disabled={isCompleted}
-          className="w-full"
-          variant={isCompleted ? 'secondary' : 'primary'}
-        >
-          {isCompleted ? (
-            <>
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Completed
-            </>
-          ) : (
-            'Mark as Completed'
-          )}
-        </Button>
+        {/* Video Analysis button - daily only */}
+        {!isWeekly && (
+          <Button
+            onClick={() => setShowVideoAnalysis(true)}
+            variant="outline"
+            className="w-full mb-2"
+            size="sm"
+          >
+            <Video className="w-4 h-4 mr-2" />
+            Analisar Forma (Vídeo IA)
+          </Button>
+        )}
+
+        {/* Weekly quest progress bar */}
+        {isWeekly && weeklyProgress && (
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-white/50 text-xs font-mono uppercase">Sessões esta semana</span>
+              <span className={`text-xs font-mono font-bold ${isCompleted ? 'text-green-400' : 'text-neon-blue'}`}>
+                {weeklyProgress.current}/{weeklyProgress.target}
+              </span>
+            </div>
+            <div className="h-2.5 rounded-full bg-shadow-700 overflow-hidden border border-white/5">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${
+                  isCompleted
+                    ? 'bg-green-500'
+                    : 'bg-gradient-to-r from-neon-blue to-neon-cyan'
+                }`}
+                style={{ width: `${Math.min(100, (weeklyProgress.current / weeklyProgress.target) * 100)}%` }}
+              />
+            </div>
+            {!isCompleted && (
+              <p className="text-white/30 text-[10px] mt-1.5 text-center font-mono">
+                Completa automaticamente ao atingir {weeklyProgress.target} sessões
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Complete button - daily quests only (weekly auto-completes) */}
+        {!isWeekly && (
+          <Button
+            onClick={onComplete}
+            disabled={isCompleted}
+            className="w-full"
+            variant={isCompleted ? 'secondary' : 'primary'}
+          >
+            {isCompleted ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 mr-2" />
+                Completed
+              </>
+            ) : (
+              'Mark as Completed'
+            )}
+          </Button>
+        )}
+
+        {/* Weekly completed badge */}
+        {isWeekly && isCompleted && (
+          <div className="w-full flex items-center justify-center gap-2 py-3 rounded bg-green-500/10 border border-green-500/30">
+            <CheckCircle2 className="w-5 h-5 text-green-400" />
+            <span className="text-green-400 font-display text-sm uppercase tracking-wider">
+              Weekly Completed
+            </span>
+          </div>
+        )}
+
+        {/* Video Analysis Modal */}
+        {showVideoAnalysis && (
+          <VideoFormAnalysis
+            quest={quest}
+            onClose={() => setShowVideoAnalysis(false)}
+          />
+        )}
       </div>
 
       {/* Completed overlay effect */}
@@ -205,6 +271,32 @@ export function QuestsPage() {
     (state) => state.hasGymAccess ?? state.user?.hasGymAccess ?? null
   );
   const user = useAppStore((state) => state.user);
+  const trainingHistory = useAppStore((state) => state.trainingHistory);
+
+  // Compute weekly training progress
+  const weeklyProgress = useMemo(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=Sun
+    const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - mondayOffset);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const uniqueDays = new Set(
+      trainingHistory
+        .filter((day) => {
+          const d = new Date(day.date);
+          return d >= weekStart && day.questsCompleted > 0;
+        })
+        .map((day) => {
+          const d = new Date(day.date);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime();
+        })
+    ).size;
+
+    return uniqueDays;
+  }, [trainingHistory]);
 
   const [showCheckIn, setShowCheckIn] = useState(!lastCheckIn);
   const [checkInData, setCheckInData] = useState({
@@ -469,6 +561,11 @@ export function QuestsPage() {
             key={quest.id}
             quest={quest}
             onComplete={() => completeQuest(quest.id)}
+            weeklyProgress={
+              quest.type === 'weekly'
+                ? { current: weeklyProgress, target: quest.sets }
+                : undefined
+            }
           />
         ))}
       </div>

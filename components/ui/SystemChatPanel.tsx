@@ -5,6 +5,7 @@ import { Send, Sparkles, X, Loader2, Terminal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAppStore } from '@/store/useAppStore';
 import { createSystemChat } from '@/lib/systemChatService';
+import { recordApiCall } from '@/lib/engineUsageTracker';
 import {
   ChatMessage,
   Quest,
@@ -883,6 +884,7 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
       }
       
       let result = await chatInstance.current.sendMessage({ message: userMsg.text });
+      recordApiCall();
       
       let functionCalls = result?.functionCalls;
       
@@ -894,6 +896,7 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
             functionResponse: tr
           }))
         });
+        recordApiCall();
         
         functionCalls = result?.functionCalls;
       }

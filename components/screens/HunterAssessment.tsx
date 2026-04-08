@@ -40,6 +40,7 @@ import type {
 } from '@/types';
 import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
 import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog } from '@/lib/equipmentCatalog';
+import { recordApiCall } from '@/lib/engineUsageTracker';
 
 interface AssessmentData {
   height: number;
@@ -663,6 +664,7 @@ export function HunterAssessment() {
       });
 
       const result = await response.json();
+      recordApiCall();
       const assessment = JSON.parse(result.response);
       const equipmentCatalog = buildAssessmentEquipmentCatalog(
         assessment?.equipmentCatalog,
@@ -754,6 +756,18 @@ export function HunterAssessment() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
+      {/* Floating API Key change button */}
+      <button
+        onClick={() => {
+          setTempApiKey(geminiApiKey || '');
+          setShowApiKeyModal(true);
+        }}
+        title="Alterar chave da API"
+        className="fixed top-3 right-3 z-50 p-2 rounded-lg bg-shadow-800/80 border border-white/10 hover:border-neon-blue/40 hover:bg-neon-blue/10 transition-all group"
+      >
+        <Key className="w-3.5 h-3.5 text-white/30 group-hover:text-neon-blue transition-colors" />
+      </button>
+
       {/* Decorative frame */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-4 left-4 right-4 h-1 bg-gradient-to-r from-transparent via-neon-blue/40 to-transparent" />
@@ -1218,6 +1232,12 @@ export function HunterAssessment() {
                     <p className="text-white/70 text-sm mb-4">
                         Para processar sua avaliação física e gerar seu protocolo APEXSYS, o sistema precisa de acesso ao núcleo Gemini IA.
                     </p>
+
+                    {geminiApiKey && (
+                      <div className="mb-3 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded text-xs text-green-400/80 font-mono truncate">
+                        Chave atual: {geminiApiKey.slice(0, 8)}...{geminiApiKey.slice(-4)}
+                      </div>
+                    )}
 
                     <input 
                         type="password"

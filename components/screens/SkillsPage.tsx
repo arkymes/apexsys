@@ -22,6 +22,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { PILLAR_NAMES, type MovementPillar, type SkillDefinition } from '@/types';
 import { SKILL_DEFINITIONS, LEVEL_UP_CHALLENGES } from '@/lib/skillDefinitions';
 import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
+import { recordApiCall } from '@/lib/engineUsageTracker';
 import { useEffect, useState } from 'react';
 
 interface SkillNode {
@@ -263,6 +264,7 @@ export function SkillsPage() {
       });
 
       const data = await response.json();
+      recordApiCall();
       const validation = JSON.parse(data.response || '{}');
       
       setValidationResults(prev => ({

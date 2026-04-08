@@ -7,6 +7,8 @@ interface GymSkillVariant {
   description: string;
   equipmentKeywords: string[];
   benefits: string[];
+  /** Fixed skill level (0-4). Determines where this skill sits in the skill tree. */
+  fixedLevel: number;
 }
 
 const normalizeText = (value: string) =>
@@ -26,6 +28,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Empurrar horizontal com carga livre e controle escapular.',
     equipmentKeywords: ['halter', 'dumbbell', 'banco'],
     benefits: ['Forca de peitoral', 'Estabilidade de ombro'],
+    fixedLevel: 1,
   },
   {
     id: 'gym-push-barbell-bench',
@@ -34,6 +37,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Base de forca para empurrar com barra reta.',
     equipmentKeywords: ['barra', 'barbell', 'banco', 'smith'],
     benefits: ['Forca maxima de push', 'Progressao de carga'],
+    fixedLevel: 2,
   },
   {
     id: 'gym-pull-lat-pulldown',
@@ -42,6 +46,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Puxada vertical controlada para dorsais e escapulas.',
     equipmentKeywords: ['roldana', 'pulley', 'cabo', 'cross'],
     benefits: ['Forca de dorsais', 'Controle escapular'],
+    fixedLevel: 1,
   },
   {
     id: 'gym-pull-row-machine',
@@ -50,6 +55,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Remada horizontal com foco em dorsais e romboides.',
     equipmentKeywords: ['maquina', 'machine', 'remada'],
     benefits: ['Espessura de costas', 'Controle de tronco'],
+    fixedLevel: 2,
   },
   {
     id: 'gym-legs-barbell-squat',
@@ -58,6 +64,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Padrao dominante de joelho com carga progressiva.',
     equipmentKeywords: ['barra', 'barbell', 'rack', 'smith'],
     benefits: ['Forca de pernas', 'Estabilidade de core'],
+    fixedLevel: 2,
   },
   {
     id: 'gym-legs-leg-press',
@@ -66,6 +73,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Trabalho de quadriceps e gluteos com controle de amplitude.',
     equipmentKeywords: ['leg press', 'maquina'],
     benefits: ['Volume para pernas', 'Seguranca articular'],
+    fixedLevel: 1,
   },
   {
     id: 'gym-core-cable-crunch',
@@ -74,6 +82,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Flexao de tronco com resistencia por cabo.',
     equipmentKeywords: ['roldana', 'cabo', 'pulley'],
     benefits: ['Forca de core', 'Resistencia abdominal'],
+    fixedLevel: 1,
   },
   {
     id: 'gym-core-loaded-carry',
@@ -82,6 +91,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Caminhada carregada para estabilizacao total.',
     equipmentKeywords: ['halter', 'dumbbell', 'kettlebell'],
     benefits: ['Estabilidade global', 'Resistencia de pegada'],
+    fixedLevel: 2,
   },
   {
     id: 'gym-mobility-cable-rotation',
@@ -90,6 +100,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Mobilidade ativa de tronco com resistencia leve.',
     equipmentKeywords: ['cabo', 'roldana', 'pulley'],
     benefits: ['Mobilidade toracica', 'Controle de rotacao'],
+    fixedLevel: 1,
   },
   {
     id: 'gym-endurance-rower-interval',
@@ -98,6 +109,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Intervalos para condicao cardiorrespiratoria.',
     equipmentKeywords: ['remo', 'rower'],
     benefits: ['Capacidade aerobica', 'Potencia anaerobica'],
+    fixedLevel: 1,
   },
   {
     id: 'gym-endurance-treadmill-interval',
@@ -106,6 +118,7 @@ const GYM_SKILL_VARIANTS: GymSkillVariant[] = [
     description: 'Blocos de corrida com recuperacao ativa.',
     equipmentKeywords: ['esteira', 'treadmill'],
     benefits: ['Condicionamento', 'Controle de ritmo'],
+    fixedLevel: 0,
   },
 ];
 
@@ -142,7 +155,9 @@ export const getGymSkillDefinitionsByPillar = (
 
   for (const variant of GYM_SKILL_VARIANTS) {
     if (!matchesEquipment(variant.equipmentKeywords)) continue;
-    const pillarLevel = Math.max(0, Math.min(4, options.pillarLevels?.[variant.pillar]?.level ?? 0));
+    const userPillarLevel = options.pillarLevels?.[variant.pillar]?.level ?? 0;
+    // Only include gym skills the user has reached the level for
+    if (userPillarLevel < variant.fixedLevel) continue;
     const skillList = grouped[variant.pillar];
     grouped[variant.pillar] = [
       ...skillList,
@@ -151,10 +166,10 @@ export const getGymSkillDefinitionsByPillar = (
         name: variant.name,
         description: variant.description,
         pillar: variant.pillar,
-        level: pillarLevel,
+        level: variant.fixedLevel,
         skillIndex: skillList.length,
         requirements: {
-          pillarLevel: Math.max(0, pillarLevel - 1),
+          pillarLevel: Math.max(0, variant.fixedLevel),
           description: 'Acesso a equipamento compativel',
         },
         benefits: variant.benefits,

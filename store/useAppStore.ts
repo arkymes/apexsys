@@ -25,6 +25,7 @@ import { sanitizeText } from '@/lib/textSanitizer';
 import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog } from '@/lib/equipmentCatalog';
 import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
 import { getInvisibleSkillHowTo } from '@/lib/skillHowTo';
+import { recordApiCall } from '@/lib/engineUsageTracker';
 
 interface AppState {
   // App State
@@ -701,6 +702,7 @@ export const useAppStore = create<AppState>()(
           });
 
           const data = await response.json();
+          recordApiCall();
           
           let adjustment;
           try {
@@ -1213,12 +1215,50 @@ export const useAppStore = create<AppState>()(
           }
 
           const metrics = calculateWorkoutMetrics(nextTrainingHistory);
+
+          // Auto-complete weekly quests when session target is met
+          let updatedWeeklyQuests = updateQuests(weeklyQuests);
+          if (quest.type === 'daily') {
+            // Count unique training days this week (Mon-Sun)
+            const now = new Date(completedAt);
+            const dayOfWeek = now.getDay(); // 0=Sun
+            const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+            const weekStart = new Date(now);
+            weekStart.setDate(now.getDate() - mondayOffset);
+            weekStart.setHours(0, 0, 0, 0);
+
+            const uniqueTrainingDays = new Set(
+              nextTrainingHistory
+                .filter((day) => {
+                  const d = new Date(day.date);
+                  return d >= weekStart && day.questsCompleted > 0;
+                })
+                .map((day) => normalizeDateToDayKey(day.date))
+            ).size;
+
+            updatedWeeklyQuests = updatedWeeklyQuests.map((wq) => {
+              if (wq.status === 'completed' || wq.type !== 'weekly') return wq;
+              // weekly quest.sets = required session count
+              if (uniqueTrainingDays >= wq.sets) {
+                // Award weekly XP
+                get().addExp(wq.xpReward);
+                get().addMovementXP(wq.pillar, Math.max(10, Math.floor(wq.xpReward * 0.3)));
+                return { ...wq, status: 'completed' as const, completedAt };
+              }
+              return wq;
+            });
+          }
+
           return {
             dailyQuests: updateQuests(dailyQuests),
-            weeklyQuests: updateQuests(weeklyQuests),
+            weeklyQuests: updatedWeeklyQuests,
             questHistory: [
               ...(state.questHistory || []),
               { ...quest, status: 'completed', completedAt },
+              // Also add auto-completed weekly quests to history
+              ...updatedWeeklyQuests
+                .filter((wq) => wq.status === 'completed' && !weeklyQuests.find((owq) => owq.id === wq.id && owq.status === 'completed'))
+                .map((wq) => ({ ...wq, completedAt })),
             ],
             trainingHistory: nextTrainingHistory,
             user: state.user

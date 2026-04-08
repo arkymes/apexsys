@@ -17,6 +17,7 @@ import {
   CircleOff,
 } from 'lucide-react';
 import { GlassPanel } from '@/components/ui/CyberFrame';
+import { EngineHeatBar } from '@/components/ui/EngineHeatBar';
 import { useAppStore } from '@/store/useAppStore';
 import { buildEquipmentCatalogFromNames } from '@/lib/equipmentCatalog';
 import type { Equipment } from '@/types';
@@ -212,6 +213,11 @@ export function ProfilePage() {
                 {user.trainingFrequency || 3} days/week
               </div>
             </div>
+          </div>
+
+          {/* Engine Heat Bar */}
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <EngineHeatBar />
           </div>
         </GlassPanel>
 
