@@ -194,21 +194,36 @@ export function SystemAwakening() {
             </div>
 
             {/* Content */}
-            <div className="p-8">
+            <div className="p-6 sm:p-8">
               <p className="text-white/80 text-center mb-6 font-body">
-                [SYSTEM] Para ativar o Núcleo de IA e otimizar seu treinamento PMF, configure sua chave API do Gemini.
+                [SYSTEM] Para ativar o Nucleo de IA e otimizar seu treinamento PMF, configure sua chave API do Gemini.
               </p>
               
-              <p className="text-white/60 text-sm mb-2 font-display uppercase tracking-wider">
-                Gemini API Key:
-              </p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-white/60 text-sm font-display uppercase tracking-wider">
+                  Gemini API Key:
+                </p>
+                <a
+                  href="https://www.youtube.com/watch?v=eLkgX9c4EDc"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-neon-cyan/30 bg-neon-cyan/5 text-neon-cyan hover:bg-neon-cyan/15 hover:border-neon-cyan/50 transition-all text-xs font-display"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  Como pegar a chave?
+                </a>
+              </div>
               
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSubmitApiKey()}
-                placeholder="Digite sua chave API do Gemini"
+                placeholder="Cole sua chave API aqui"
                 autoFocus
                 className="input-cyber w-full text-lg"
               />

@@ -1,5 +1,50 @@
 import type { Equipment, EquipmentCategory } from '@/types';
 
+/** Maps English equipment names from exercises.json → PT-BR display names */
+export const EQUIPMENT_PT_BR: Record<string, string> = {
+  'Ab Wheel': 'Roda Abdominal',
+  'Balance Ball': 'Bola de Equilíbrio',
+  'Barbell': 'Barra',
+  'Battle Rope': 'Corda Naval',
+  'Bench': 'Banco',
+  'Bosu': 'Bosu',
+  'Box': 'Caixa / Step',
+  'Cable': 'Cabo / Roldana',
+  'Dumbbells': 'Halteres',
+  'Elastic Bands': 'Elásticos',
+  'Equalizer': 'Equalizador / Paralela',
+  'Foam Roller': 'Rolo de Espuma',
+  'Hex Bar / Trap Bar': 'Barra Hexagonal',
+  'Kettlebell': 'Kettlebell',
+  'Landmine': 'Landmine',
+  'Machine': 'Máquina',
+  'Medicine Ball': 'Bola Medicinal',
+  'Other': 'Outro',
+  'Pull-up Bar': 'Barra Fixa',
+  'Resistance Band': 'Faixa de Resistência',
+  'Smith Machine': 'Smith Machine',
+  'Stability Ball': 'Bola de Estabilidade',
+  'TRX': 'TRX / Fita de Suspensão',
+  'Wall': 'Parede',
+  'Weight Plate': 'Anilha',
+};
+
+/** Translate an equipment name to PT-BR (returns original if no translation) */
+export const translateEquipmentName = (name: string): string =>
+  EQUIPMENT_PT_BR[name] || name;
+
+/** Common gym equipment keys that should be auto-enabled when user has gym access */
+export const COMMON_GYM_EQUIPMENT: string[] = [
+  'Barbell',
+  'Dumbbells',
+  'Bench',
+  'Cable',
+  'Machine',
+  'Pull-up Bar',
+  'Weight Plate',
+  'Smith Machine',
+];
+
 const normalizeText = (value: string) =>
   value
     .toLowerCase()

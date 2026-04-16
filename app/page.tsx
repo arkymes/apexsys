@@ -12,6 +12,7 @@ import {
 } from '@/components/screens';
 import { Navigation } from '@/components/layout';
 import { useAppStore } from '@/store/useAppStore';
+import { preloadExercises } from '@/lib/exerciseService';
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -22,6 +23,7 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true);
+    preloadExercises();
   }, []);
 
   useEffect(() => {

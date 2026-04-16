@@ -120,21 +120,21 @@ export function ProgressPage() {
   };
 
   return (
-    <div className="pt-24 pb-8 px-4 max-w-7xl mx-auto">
+    <div className="pt-20 md:pt-24 pb-24 md:pb-8 px-3 sm:px-4 max-w-7xl mx-auto">
       <motion.h1
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="font-display text-3xl font-bold text-white mb-8"
+        className="font-display text-2xl sm:text-3xl font-bold text-white mb-6 sm:mb-8"
       >
         Progress Tracking
       </motion.h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <GlassPanel className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+        <GlassPanel className="p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-6">
+            <div className="flex flex-col items-center">
               <h3 className="font-display text-lg uppercase tracking-wider text-white/80 mb-4">Level</h3>
-              <CircularProgress value={user.exp} max={user.expToNextLevel} size={150} strokeWidth={10}>
+              <CircularProgress value={user.exp} max={user.expToNextLevel} size={120} strokeWidth={10}>
                 <div className="text-center">
                   <div className="text-4xl font-display font-black text-yellow-400">{user.level}</div>
                   <div className="text-xs text-white/40 uppercase">Level</div>
@@ -142,7 +142,7 @@ export function ProgressPage() {
               </CircularProgress>
             </div>
 
-            <div className="flex-1 ml-8 space-y-4">
+            <div className="flex-1 w-full sm:ml-8 space-y-3 sm:space-y-4">
               {[
                 { icon: Flame, label: 'PUSH', value: user.stats.push, color: '#ef4444', max: 100 },
                 { icon: Zap, label: 'PULL', value: user.stats.pull, color: '#eab308', max: 100 },
@@ -168,25 +168,25 @@ export function ProgressPage() {
             </div>
           </div>
 
-          <div className="flex justify-between mt-6 text-sm">
+          <div className="flex justify-between mt-4 sm:mt-6 text-sm">
             <span className="text-white/60">EXP: {user.exp}</span>
             <span className="text-white/40">NEXT: {user.expToNextLevel}</span>
           </div>
         </GlassPanel>
 
-        <GlassPanel className="p-6 opacity-50">
+        <GlassPanel className="p-4 sm:p-6 opacity-50">
           <h3 className="font-display text-lg uppercase tracking-wider text-white/60 mb-4">Stats Overview</h3>
           <p className="text-white/40 text-sm">Detailed stats coming soon...</p>
         </GlassPanel>
 
-        <GlassPanel className="p-6">
+        <GlassPanel className="p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <Calendar className="w-5 h-5 text-neon-blue" />
             <h3 className="font-display text-lg uppercase tracking-wider text-white">Training Streak</h3>
           </div>
 
-          <div className="text-center mb-6">
-            <div className="text-6xl font-display font-black text-yellow-400">{user.streak}</div>
+          <div className="text-center mb-4 sm:mb-6">
+            <div className="text-5xl sm:text-6xl font-display font-black text-yellow-400">{user.streak}</div>
             <div className="text-white/40 uppercase text-sm tracking-wider">Day Streak</div>
           </div>
 
@@ -261,13 +261,13 @@ export function ProgressPage() {
           </div>
         </GlassPanel>
 
-        <GlassPanel className="p-6">
-          <div className="flex items-center gap-2 mb-6">
+        <GlassPanel className="p-4 sm:p-6">
+          <div className="flex items-center gap-2 mb-4 sm:mb-6">
             <Trophy className="w-5 h-5 text-yellow-400" />
             <h3 className="font-display text-lg uppercase tracking-wider text-white">Rank Progress</h3>
           </div>
 
-          <div className="flex items-center justify-center gap-6 mb-8">
+          <div className="flex items-center justify-center gap-4 sm:gap-6 mb-6 sm:mb-8">
             <RankBadge rank={user.rank} size="lg" />
             <ChevronRight className="w-8 h-8 text-white/40" />
             <RankBadge rank={nextRank} size="lg" />

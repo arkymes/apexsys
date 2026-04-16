@@ -242,7 +242,7 @@ const manageSkillsTool: FunctionDeclaration = {
 
 const manageQuestsTool: FunctionDeclaration = {
   name: "manage_quests",
-  description: "Modifica, adiciona ou remove quests do usuario.",
+  description: "Modifica, adiciona ou remove quests do usuario. Para adicionar, use SEMPRE um exerciseId do banco de exercicios.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -256,19 +256,15 @@ const manageQuestsTool: FunctionDeclaration = {
         type: Type.OBJECT,
         description: "Dados da quest para adicionar/atualizar.",
         properties: {
+          exerciseId: { type: Type.STRING, description: "ID exato do exercicio do banco de exercicios. OBRIGATORIO para add." },
           title: { type: Type.STRING },
           description: { type: Type.STRING },
           executionGuide: { type: Type.STRING },
           xpReward: { type: Type.NUMBER },
           pillar: { type: Type.STRING },
           difficulty: { type: Type.STRING },
-          skillId: { type: Type.STRING },
-          skillLevel: { type: Type.NUMBER },
-          skillTags: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-          },
-          skillReason: { type: Type.STRING },
+          sets: { type: Type.NUMBER },
+          reps: { type: Type.STRING },
         },
       },
     },
@@ -294,9 +290,15 @@ export const createSystemChat = (apiKey: string, history: ChatMessage[]) => {
     - Fria, objetiva, mas encorajadora em estilo "tough love".
     - Use termos como "Protocolo", "Calibracao", "Usuario", "Sistema".
 
+    BANCO DE EXERCICIOS:
+    - O sistema possui um banco com 916 exercicios reais, cada um com ID unico, pilar, nivel, musculo, equipamento e GIF.
+    - Quando o usuario pedir pra trocar/adicionar exercicios, use get_user_state para ver o exercisePool disponivel.
+    - Para manage_quests action=add, SEMPRE preencha exerciseId com o ID exato de um exercicio do banco.
+    - NAO invente exercicios. Use SOMENTE exercicios do banco disponivel no estado do usuario.
+
     SUAS CAPACIDADES:
     - Voce pode LER o estado do usuario (use 'get_user_state').
-    - Voce pode ALTERAR quests e rotinas (use 'manage_quests').
+    - Voce pode ALTERAR quests e rotinas (use 'manage_quests'). Sempre use exerciseId do banco.
     - Voce pode REGISTRAR informacoes medicas/rotina (use 'update_bio').
     - Voce pode ATUALIZAR equipamentos reais disponiveis (use 'update_equipment').
     - Voce pode ATUALIZAR contexto de treino (use 'update_user_context').
@@ -312,7 +314,7 @@ export const createSystemChat = (apiKey: string, history: ChatMessage[]) => {
     - Se o usuario mudar tempo, frequencia, objetivo ou nivel, use 'update_user_context'.
     - Se o usuario pedir recalibracao de rank/stats/pilares, use 'update_performance_profile'.
     - Se o usuario relatar condicao cronica (ex: acromio tipo 2), desative skills de risco e adicione skills adaptativas com tags e motivo via 'manage_skills'.
-    - Antes de alterar skills, leia estado atual com 'get_user_state' quando necessario para pegar IDs corretos.
+    - Antes de alterar quests ou skills, leia estado atual com 'get_user_state' para ver exercicios disponiveis e IDs corretos.
     - Mantenha o tom imersivo.
   `;
 

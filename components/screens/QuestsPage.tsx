@@ -22,6 +22,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { Quest } from '@/types';
 import { sanitizeText } from '@/lib/textSanitizer';
 import { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 
 const difficultyColors = {
   easy: '#22c55e',
@@ -76,102 +77,70 @@ function QuestCard({ quest, onComplete, weeklyProgress }: QuestCardProps) {
       {quest.type === 'daily' && (
         <div className="absolute top-2 right-2 px-2 py-1 bg-neon-blue/20 rounded text-xs font-display text-neon-blue uppercase text-right">
           <span>Daily</span>
-          {typeof quest.skillLevel === 'number' && (
+          {quest.exerciseId && (
             <span className="block text-[10px] font-mono tracking-normal text-white/75 normal-case mt-0.5">
-              Skill L{quest.skillLevel}
+              {quest.xpReward} XP
             </span>
           )}
         </div>
       )}
       
-      <div className="p-6">
-        {/* Icon */}
-        <div className="w-12 h-12 rounded-lg bg-shadow-600 border border-white/10 flex items-center justify-center mb-4">
-          <PillarIcon className="w-6 h-6" style={{ color: pillarColor }} />
-        </div>
-
-        {/* Title */}
-        <h3 className={`font-display text-xl font-bold mb-2 ${isCompleted ? 'text-white/50 line-through' : 'text-white'}`}>
-          {sanitizeText(quest.name)}
-        </h3>
-
-        {/* Description */}
-        <p className="text-white/50 text-sm mb-4 font-body">{sanitizeText(quest.description)}</p>
-
-        {/* Difficulty indicators */}
-        <div className="flex gap-1 mb-4">
-          {[1, 2, 3, 4].map((dot) => (
-            <div
-              key={dot}
-              className={`w-2 h-2 rounded-full ${
-                dot <= (quest.difficulty === 'easy' ? 1 : quest.difficulty === 'medium' ? 2 : 3)
-                  ? 'bg-neon-blue'
-                  : 'bg-white/20'
-              }`}
+      <div className="p-4 sm:p-6">
+        {/* Exercise GIF preview */}
+        {quest.previewSrc && !isCompleted && (
+          <div className="mb-4 rounded-lg overflow-hidden border border-white/10 bg-shadow-800">
+            <img
+              src={quest.previewSrc}
+              alt={quest.name}
+              className="w-full h-36 sm:h-48 object-contain bg-black/30"
+              loading="lazy"
             />
-          ))}
+          </div>
+        )}
+
+        {/* Pillar Icon + Title */}
+        <div className="flex items-start gap-3 mb-3">
+          <div className="w-10 h-10 rounded-lg bg-shadow-600 border border-white/10 flex items-center justify-center flex-shrink-0">
+            <PillarIcon className="w-5 h-5" style={{ color: pillarColor }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className={`font-display text-lg font-bold ${isCompleted ? 'text-white/50 line-through' : 'text-white'}`}>
+              {sanitizeText(quest.name)}
+            </h3>
+            <p className="text-white/40 text-xs mt-0.5">{sanitizeText(quest.description)}</p>
+          </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 p-4 bg-shadow-800/50 rounded-lg mb-4">
+        {/* Sets/Reps + Difficulty + XP */}
+        <div className="grid grid-cols-3 gap-3 p-3 bg-shadow-800/50 rounded-lg mb-4">
           <div className="text-center">
-            <div className="text-white/40 text-xs uppercase mb-1">Reward XP</div>
-            <div className="text-yellow-400 font-display font-bold">+{quest.xpReward} XP</div>
+            <div className="text-white/40 text-[10px] uppercase mb-0.5">Séries</div>
+            <div className="text-white font-display text-sm">{quest.sets}x{quest.reps}</div>
           </div>
           <div className="text-center">
-            <div className="text-white/40 text-xs uppercase mb-1">Stat Boost</div>
-            <div className="text-red-400 font-display font-bold">
-              {quest.statBoost ? `+${quest.statBoost.amount} ${quest.statBoost.stat.slice(0, 3).toUpperCase()}` : '-'}
-            </div>
-          </div>
-          <div className="text-center">
-            <div className="text-white/40 text-xs uppercase mb-1">Sets/Reps</div>
-            <div className="text-white font-display">{quest.sets}x{quest.reps}</div>
-          </div>
-          <div className="text-center">
-            <div className="text-white/40 text-xs uppercase mb-1">Difficulty</div>
+            <div className="text-white/40 text-[10px] uppercase mb-0.5">Dificuldade</div>
             <div 
-              className="font-display font-bold uppercase"
+              className="font-display text-sm font-bold uppercase"
               style={{ color: difficultyColors[quest.difficulty] }}
             >
               {quest.difficulty}
             </div>
           </div>
-        </div>
-
-        {/* Exercise info */}
-        <div className="flex items-center justify-between p-3 bg-shadow-700/50 rounded-lg border border-white/5 mb-4">
-          <span className="text-white/80 font-body">{sanitizeText(quest.name)}</span>
-          <span className="text-white/40 font-mono text-sm">{quest.sets}x {quest.reps}</span>
-        </div>
-
-        <div className="mb-4 p-3 bg-neon-blue/5 border border-neon-blue/20 rounded-lg">
-          <p className="text-neon-blue text-[11px] uppercase tracking-wider mb-1">How to do</p>
-          <p className="text-white/75 text-sm">
-            {sanitizeText(quest.executionGuide || quest.description)}
-          </p>
-        </div>
-
-        {(Array.isArray(quest.skillTags) && quest.skillTags.length > 0) || quest.skillReason ? (
-          <div className="mb-4 p-3 bg-amber-500/5 border border-amber-400/20 rounded-lg">
-            <p className="text-amber-300 text-[11px] uppercase tracking-wider mb-1">Adaptive Tags</p>
-            {Array.isArray(quest.skillTags) && quest.skillTags.length > 0 ? (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {quest.skillTags.map((tag) => (
-                  <span
-                    key={`${quest.id}-${tag}`}
-                    className="px-2 py-0.5 text-[10px] rounded border border-amber-400/30 bg-amber-400/10 text-amber-200"
-                  >
-                    {sanitizeText(tag)}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {quest.skillReason ? (
-              <p className="text-amber-100/80 text-xs">{sanitizeText(quest.skillReason)}</p>
-            ) : null}
+          <div className="text-center">
+            <div className="text-white/40 text-[10px] uppercase mb-0.5">XP</div>
+            <div className="text-yellow-400 font-display text-sm font-bold">+{quest.xpReward}</div>
           </div>
-        ) : null}
+        </div>
+
+        {/* How To / Execution Guide */}
+        {quest.executionGuide && (
+          <div className="mb-4 p-3 bg-neon-blue/5 border border-neon-blue/20 rounded-lg">
+            <p className="text-neon-blue text-[11px] uppercase tracking-wider mb-1">Como Executar</p>
+            <p className="text-white/75 text-sm leading-relaxed">
+              {sanitizeText(quest.executionGuide)}
+            </p>
+          </div>
+        )}
 
         {/* Video Analysis button - daily only */}
         {!isWeekly && (
@@ -263,7 +232,7 @@ export function QuestsPage() {
   const dailyQuests = useAppStore((state) => state.dailyQuests);
   const weeklyQuests = useAppStore((state) => state.weeklyQuests);
   const completeQuest = useAppStore((state) => state.completeQuest);
-  const generatePMFQuests = useAppStore((state) => state.generatePMFQuests);
+  const setScreen = useAppStore((state) => state.setScreen);
   const logCheckIn = useAppStore((state) => state.logCheckIn);
   const setGymAccess = useAppStore((state) => state.setGymAccess);
   const lastCheckIn = useAppStore((state) => state.lastCheckIn);
@@ -272,6 +241,7 @@ export function QuestsPage() {
   );
   const user = useAppStore((state) => state.user);
   const trainingHistory = useAppStore((state) => state.trainingHistory);
+  const router = useRouter();
 
   // Compute weekly training progress
   const weeklyProgress = useMemo(() => {
@@ -298,7 +268,19 @@ export function QuestsPage() {
     return uniqueDays;
   }, [trainingHistory]);
 
-  const [showCheckIn, setShowCheckIn] = useState(!lastCheckIn);
+  // Show check-in only if no check-in today
+  const hasTodayCheckIn = (() => {
+    if (!lastCheckIn) return false;
+    const checkInDate = new Date((lastCheckIn as any).timestamp || (lastCheckIn as any).date || 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return checkInDate.getTime() >= today.getTime();
+  })();
+
+  const hasPendingQuests = dailyQuests.length > 0 &&
+    dailyQuests.some((q) => q.status === 'pending');
+
+  const [showCheckIn, setShowCheckIn] = useState(!hasTodayCheckIn && !hasPendingQuests);
   const [checkInData, setCheckInData] = useState({
     sleepQuality: 'ok' as 'poor' | 'ok' | 'great',
     painAreas: [] as string[],
@@ -327,26 +309,22 @@ export function QuestsPage() {
       allDailyResolved && !!lastDailyCompletion && lastDailyCompletion.getTime() < today.getTime();
 
     if (user && !showCheckIn && (dailyQuests.length === 0 || shouldRefreshForNewDay)) {
-      // Generate initial PMF quests if none exist, or rotate to a new day
-      generatePMFQuests({
-        priorityPillars: ['push', 'pull', 'core'],
-        painAreas: lastCheckIn?.painAreas || [],
-        hasGymAccess: checkInData.hasGymAccess,
-      });
+      // Redirect to AI-based protocol generation
+      setScreen('protocol-generating');
+      router.push('/');
     }
-  }, [user, showCheckIn, dailyQuests, generatePMFQuests, lastCheckIn, checkInData.hasGymAccess]);
+  }, [user, showCheckIn, dailyQuests, setScreen, router]);
 
   const handleCheckIn = () => {
     logCheckIn(checkInData);
     setGymAccess(checkInData.hasGymAccess);
     setShowCheckIn(false);
     
-    // Generate quests based on check-in
-    generatePMFQuests({
-      priorityPillars: ['push', 'pull', 'core'],
-      painAreas: checkInData.painAreas,
-      hasGymAccess: checkInData.hasGymAccess,
-    });
+    // Only regenerate if there are no pending quests
+    if (dailyQuests.length === 0 || dailyQuests.every((q) => q.status === 'completed' || q.status === 'failed')) {
+      setScreen('protocol-generating');
+      router.push('/');
+    }
   };
 
   const handleTrainingLogSubmit = async () => {
@@ -385,13 +363,13 @@ export function QuestsPage() {
 
   if (showCheckIn) {
     return (
-      <div className="pt-24 pb-8 px-4 max-w-4xl mx-auto">
+      <div className="pt-20 md:pt-24 pb-24 md:pb-8 px-3 sm:px-4 max-w-4xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-shadow-800/50 border border-white/10 rounded-lg p-8"
+          className="bg-shadow-800/50 border border-white/10 rounded-lg p-4 sm:p-8"
         >
-          <h2 className="font-display text-2xl font-bold text-white mb-6 text-center">
+          <h2 className="font-display text-xl sm:text-2xl font-bold text-white mb-4 sm:mb-6 text-center">
             Check-in Diário - Sistema PMF
           </h2>
           
@@ -483,11 +461,11 @@ export function QuestsPage() {
   }
 
   return (
-    <div className="pt-24 pb-8 px-4 max-w-7xl mx-auto">
+    <div className="pt-20 md:pt-24 pb-24 md:pb-8 px-3 sm:px-4 max-w-7xl mx-auto">
       <motion.h1
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="font-display text-3xl font-bold text-white mb-8"
+        className="font-display text-2xl sm:text-3xl font-bold text-white mb-6 sm:mb-8"
       >
         Missões PMF Ativas
       </motion.h1>
@@ -555,7 +533,7 @@ export function QuestsPage() {
         </motion.div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {[...dailyQuests, ...weeklyQuests].map((quest) => (
           <QuestCard
             key={quest.id}

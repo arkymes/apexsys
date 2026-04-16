@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Settings,
@@ -15,11 +15,14 @@ import {
   Repeat,
   CheckCircle2,
   CircleOff,
+  Minus,
+  Plus,
+  FileText,
 } from 'lucide-react';
 import { GlassPanel } from '@/components/ui/CyberFrame';
 import { EngineHeatBar } from '@/components/ui/EngineHeatBar';
 import { useAppStore } from '@/store/useAppStore';
-import { buildEquipmentCatalogFromNames } from '@/lib/equipmentCatalog';
+import { getAllEquipmentTypesSync, isExercisesLoaded, preloadExercises } from '@/lib/exerciseService';
 import type { Equipment } from '@/types';
 
 function DebuffCard({ debuff }: { debuff: any }) {
@@ -90,21 +93,40 @@ interface EquipmentCardProps {
 
 function EquipmentCard({ item, onEnable, onDisable }: EquipmentCardProps) {
   const enabled = item.enabledForAI ?? item.equipped ?? true;
+  const isAI = item.source === 'assessment-ai';
+  const isUser = item.source === 'user';
+  const borderColor = isAI ? 'border-purple-500/30' : isUser ? 'border-amber-500/25' : 'border-white/15';
+  const bgColor = isAI ? 'bg-purple-950/20' : isUser ? 'bg-amber-950/10' : 'bg-shadow-700/40';
+
   return (
-    <div className="p-3 rounded-lg border border-white/15 bg-shadow-700/40">
+    <div className={`p-3 rounded-lg border ${borderColor} ${bgColor}`}>
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-white font-display">{item.name}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-white font-display truncate">{item.name}</span>
+            {isAI && (
+              <span className="flex-shrink-0 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                IA
+              </span>
+            )}
+            {isUser && (
+              <span className="flex-shrink-0 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded bg-amber-500/15 text-amber-300 border border-amber-500/25">
+                Custom
+              </span>
+            )}
+          </div>
           <div className="text-xs text-white/40 uppercase tracking-wider">
-            {item.category || 'other'} {item.source ? `- ${item.source}` : ''}
+            {item.category || 'other'}
           </div>
           {item.notes ? <div className="text-xs text-white/55 mt-1">{item.notes}</div> : null}
         </div>
         <button
           onClick={enabled ? onDisable : onEnable}
-          className={`px-2 py-1 rounded text-xs border transition-colors ${
+          className={`flex-shrink-0 px-2 py-1 rounded text-xs border transition-colors ${
             enabled
-              ? 'border-green-500/40 text-green-300 bg-green-500/10'
+              ? isAI
+                ? 'border-purple-500/40 text-purple-300 bg-purple-500/10'
+                : 'border-green-500/40 text-green-300 bg-green-500/10'
               : 'border-white/20 text-white/60 bg-black/20'
           }`}
         >
@@ -121,6 +143,7 @@ export function ProfilePage() {
   const availableEquipment = useAppStore((state) => state.availableEquipment);
   const equipItem = useAppStore((state) => state.equipItem);
   const unequipItem = useAppStore((state) => state.unequipItem);
+  const syncEquipmentFromExercises = useAppStore((state) => state.syncEquipmentFromExercises);
   const particlesEnabled = useAppStore((state) => state.particlesEnabled);
   const soundEnabled = useAppStore((state) => state.soundEnabled);
   const notificationsEnabled = useAppStore((state) => state.notificationsEnabled);
@@ -128,12 +151,25 @@ export function ProfilePage() {
   const toggleSound = useAppStore((state) => state.toggleSound);
   const toggleNotifications = useAppStore((state) => state.toggleNotifications);
   const resetApp = useAppStore((state) => state.resetApp);
+  const setTrainingFrequency = useAppStore((state) => state.setTrainingFrequency);
   const [showWipeModal, setShowWipeModal] = useState(false);
 
-  if (!user) return null;
+  // Sync equipment list from exercise database on mount
+  useEffect(() => {
+    const sync = () => {
+      const types = getAllEquipmentTypesSync();
+      if (types.length > 0) {
+        syncEquipmentFromExercises(types);
+      }
+    };
+    if (isExercisesLoaded()) {
+      sync();
+    } else {
+      preloadExercises().then(sync);
+    }
+  }, [syncEquipmentFromExercises]);
 
-  const equipmentCatalog =
-    equipment.length > 0 ? equipment : buildEquipmentCatalogFromNames(availableEquipment, 'user');
+  if (!user) return null;
 
   const handleWipeProfile = () => {
     sessionStorage.removeItem('tempHunterName');
@@ -143,18 +179,18 @@ export function ProfilePage() {
   };
 
   return (
-    <div className="pt-24 pb-8 px-4 max-w-7xl mx-auto relative">
+    <div className="pt-20 md:pt-24 pb-24 md:pb-8 px-3 sm:px-4 max-w-7xl mx-auto relative">
       <motion.h1
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="font-display text-3xl font-bold text-white mb-8"
+        className="font-display text-2xl sm:text-3xl font-bold text-white mb-6 sm:mb-8"
       >
         Profile
       </motion.h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {user.debuffs && user.debuffs.length > 0 && (
-          <GlassPanel className="p-6 lg:col-span-2 border-red-500/30 bg-red-950/20">
+          <GlassPanel className="p-4 sm:p-6 lg:col-span-2 border-red-500/30 bg-red-950/20">
             <div className="flex items-center gap-2 mb-4 text-red-400">
               <HeartPulse className="w-5 h-5" />
               <h3 className="font-display text-lg uppercase tracking-wider">
@@ -169,13 +205,33 @@ export function ProfilePage() {
           </GlassPanel>
         )}
 
-        <GlassPanel className="p-6">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-20 h-20 rounded-full bg-shadow-600 border-2 border-neon-blue/30 flex items-center justify-center">
-              <User className="w-10 h-10 text-white/60" />
+        {/* AI Clinical Notes / Recommendations */}
+        {user.bioData && user.bioData.trim() && (
+          <GlassPanel className="p-4 sm:p-6 lg:col-span-2 border-neon-blue/20">
+            <div className="flex items-center gap-2 mb-4 text-neon-blue">
+              <FileText className="w-5 h-5" />
+              <h3 className="font-display text-lg uppercase tracking-wider">
+                Notas da IA / Recomendacoes
+              </h3>
+            </div>
+            <div className="bg-shadow-800/50 rounded-lg border border-white/5 p-4">
+              <p className="text-white/70 text-sm leading-relaxed whitespace-pre-line">
+                {user.bioData}
+              </p>
+            </div>
+            <p className="text-white/30 text-xs mt-2">
+              Gerado durante o Assessment. A IA usa essas notas para personalizar seus treinos.
+            </p>
+          </GlassPanel>
+        )}
+
+        <GlassPanel className="p-4 sm:p-6">
+          <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-shadow-600 border-2 border-neon-blue/30 flex items-center justify-center">
+              <User className="w-7 h-7 sm:w-10 sm:h-10 text-white/60" />
             </div>
             <div>
-              <h2 className="font-display text-2xl font-bold text-white">{user.name}</h2>
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-white">{user.name}</h2>
               <div className="text-white/60 font-body">
                 Level {user.level} - {user.rank}-Rank
               </div>
@@ -183,7 +239,7 @@ export function ProfilePage() {
             </div>
           </div>
 
-          <div className="bg-transparent border border-white/30 grid grid-cols-3 gap-4 p-4 shadow-[0_0_16px_rgba(255,255,255,0.12)]">
+          <div className="bg-transparent border border-white/30 grid grid-cols-3 gap-2 sm:gap-4 p-3 sm:p-4 shadow-[0_0_16px_rgba(255,255,255,0.12)]">
             <div className="text-center">
               <div className="text-white/40 text-xs uppercase mb-1">Height</div>
               <div className="text-white font-display">{user.height} cm</div>
@@ -198,7 +254,7 @@ export function ProfilePage() {
             </div>
           </div>
 
-          <div className="mt-4 bg-transparent border border-white/30 grid grid-cols-2 gap-4 p-4 shadow-[0_0_16px_rgba(255,255,255,0.08)]">
+          <div className="mt-4 bg-transparent border border-white/30 grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 sm:p-4 shadow-[0_0_16px_rgba(255,255,255,0.08)]">
             <div className="text-center">
               <div className="text-white/40 text-xs uppercase mb-1">Available Time</div>
               <div className="text-white font-display flex items-center justify-center gap-1">
@@ -206,11 +262,27 @@ export function ProfilePage() {
                 {user.availableTime || 45} min/day
               </div>
             </div>
-            <div className="text-center border-l border-white/10">
+            <div className="text-center sm:border-l border-white/10">
               <div className="text-white/40 text-xs uppercase mb-1">Training Frequency</div>
-              <div className="text-white font-display flex items-center justify-center gap-1">
-                <Repeat className="w-4 h-4 text-neon-blue" />
-                {user.trainingFrequency || 3} days/week
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setTrainingFrequency((user.trainingFrequency || 3) - 1)}
+                  disabled={(user.trainingFrequency || 3) <= 2}
+                  className="w-7 h-7 rounded border border-white/20 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-neon-blue transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <div className="text-white font-display flex items-center gap-1">
+                  <Repeat className="w-4 h-4 text-neon-blue" />
+                  {user.trainingFrequency || 3}x/week
+                </div>
+                <button
+                  onClick={() => setTrainingFrequency((user.trainingFrequency || 3) + 1)}
+                  disabled={(user.trainingFrequency || 3) >= 7}
+                  className="w-7 h-7 rounded border border-white/20 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-neon-blue transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           </div>
@@ -221,15 +293,24 @@ export function ProfilePage() {
           </div>
         </GlassPanel>
 
-        <GlassPanel className="p-6">
+        <GlassPanel className="p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <Dumbbell className="w-5 h-5 text-neon-blue" />
-            <h3 className="font-display text-lg uppercase tracking-wider text-white">Training Equipment</h3>
+            <h3 className="font-display text-lg uppercase tracking-wider text-white">Equipamentos</h3>
           </div>
 
-          {equipmentCatalog.length > 0 ? (
-            <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-              {equipmentCatalog.map((item) => (
+          <p className="text-white/40 text-xs mb-3">
+            Ative os equipamentos que você tem acesso. A IA usará apenas os ativos para gerar treinos.
+          </p>
+
+          {equipment.length > 0 ? (
+            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+              {[...equipment]
+                .sort((a, b) => {
+                  const order: Record<string, number> = { 'assessment-ai': 0, 'user': 1, 'system': 2 };
+                  return (order[a.source ?? 'system'] ?? 2) - (order[b.source ?? 'system'] ?? 2);
+                })
+                .map((item) => (
                 <EquipmentCard
                   key={item.id}
                   item={item}
@@ -241,34 +322,17 @@ export function ProfilePage() {
           ) : (
             <div className="text-center py-8 text-white/40">
               <CircleOff className="w-8 h-8 mx-auto mb-2" />
-              Nenhum equipamento informado no perfil.
+              Carregando equipamentos...
             </div>
           )}
 
-          <div className="mt-4 pt-4 border-t border-white/10">
-            <p className="text-white/50 text-xs uppercase tracking-wider mb-2">Raw input list</p>
-            {availableEquipment.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {availableEquipment.map((item) => (
-                  <span
-                    key={item}
-                    className="px-2 py-1 text-xs rounded border border-neon-blue/30 bg-neon-blue/10 text-neon-blue"
-                  >
-                    {item}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-white/30 text-sm">Nenhum equipamento informado.</p>
-            )}
-            <p className="text-xs text-white/40 mt-3 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3 text-green-400" />
-              Itens marcados como "Ativo IA" podem ser usados na geracao dos treinos.
-            </p>
-          </div>
+          <p className="text-xs text-white/40 mt-3 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3 text-green-400" />
+            Itens marcados como "Ativo IA" serão usados na geração dos treinos.
+          </p>
         </GlassPanel>
 
-        <GlassPanel className="p-6 lg:col-span-2">
+        <GlassPanel className="p-4 sm:p-6 lg:col-span-2">
           <div className="flex items-center gap-2 mb-4">
             <Settings className="w-5 h-5 text-white/60" />
             <h3 className="font-display text-lg uppercase tracking-wider text-white">Settings</h3>

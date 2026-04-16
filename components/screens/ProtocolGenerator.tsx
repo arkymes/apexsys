@@ -4,11 +4,10 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, CheckCircle2, Scroll, Crown, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import type { Quest, MovementPillar, SkillDefinition } from '@/types';
-import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
+import type { Quest, MovementPillar, Exercise } from '@/types';
+import { EXERCISE_XP_BY_LEVEL } from '@/types';
+import { getExercisesForQuestSync, getExerciseByIdSync, isExercisesLoaded } from '@/lib/exerciseService';
 import { sanitizeText } from '@/lib/textSanitizer';
-import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
-import { getInvisibleSkillHowTo } from '@/lib/skillHowTo';
 import { recordApiCall } from '@/lib/engineUsageTracker';
 
 const mapPillarToStat = (pillar?: string) => {
@@ -40,24 +39,6 @@ const normalizeText = (value: string) =>
 const isMovementPillar = (value: unknown): value is MovementPillar =>
   typeof value === 'string' && PILLARS.includes(value as MovementPillar);
 
-const resolveDailyQuestCount = (availableTime?: number) => {
-  const time = Number(availableTime) || 45;
-  if (time <= 20) return 2;
-  if (time <= 35) return 3;
-  if (time <= 50) return 4;
-  if (time <= 70) return 5;
-  return 6;
-};
-
-const resolveSetCount = (availableTime?: number, trainingFrequency?: number) => {
-  const time = Number(availableTime) || 45;
-  const freq = Number(trainingFrequency) || 3;
-  let sets = time >= 60 ? 4 : time <= 20 ? 2 : 3;
-  if (freq <= 3) sets += 1;
-  if (freq >= 6) sets -= 1;
-  return Math.max(2, Math.min(5, sets));
-};
-
 const defaultRepsByPillar = (pillar: MovementPillar) => {
   switch (pillar) {
     case 'core':
@@ -71,118 +52,23 @@ const defaultRepsByPillar = (pillar: MovementPillar) => {
   }
 };
 
-const defaultExecutionGuide = (exerciseName: string, pillar: MovementPillar, skillId?: string) =>
-  getInvisibleSkillHowTo({ skillId, exerciseName, pillar });
-
-const buildSkillDefinitionLookup = () => {
-  const lookup: Record<string, SkillDefinition> = {};
-  for (const pillar of PILLARS) {
-    const levels = SKILL_DEFINITIONS[pillar] || {};
-    for (const level of Object.keys(levels)) {
-      const skillDefs = levels[Number(level)] || [];
-      for (const skillDef of skillDefs) {
-        lookup[skillDef.id] = skillDef;
-      }
-    }
-  }
-  return lookup;
-};
-
-const SKILL_LOOKUP = buildSkillDefinitionLookup();
-
-const buildUnlockedSkillsByPillar = (
+const buildExercisePoolByPillar = (
   user: any,
-  options?: { hasGymAccess?: boolean | null; availableEquipment?: string[] }
-): Record<MovementPillar, SkillDefinition[]> => {
-  const byPillar: Record<MovementPillar, SkillDefinition[]> = {
-    push: [],
-    pull: [],
-    legs: [],
-    core: [],
-    mobility: [],
-    endurance: [],
+  options?: { enabledEquipment?: string[] }
+): Record<MovementPillar, Exercise[]> => {
+  const byPillar: Record<MovementPillar, Exercise[]> = {
+    push: [], pull: [], legs: [], core: [], mobility: [], endurance: [],
   };
-  const skillConstraints = (user?.skillConstraints || {}) as Record<
-    string,
-    { status?: string; reason?: string; tags?: string[]; condition?: string }
-  >;
-  const isDisabled = (skillId: string) => skillConstraints?.[skillId]?.status === 'disabled';
-  const customSkillsByPillar = (user?.customSkills || {}) as Partial<
-    Record<MovementPillar, SkillDefinition[]>
-  >;
-  const findCustomSkillById = (skillId: string) => {
-    for (const pillar of PILLARS) {
-      const found = (customSkillsByPillar[pillar] || []).find((skill) => skill.id === skillId);
-      if (found) return found;
-    }
-    return undefined;
-  };
-
-  const unlockedIds = Object.entries(user?.userSkills || {})
-    .filter(([, skill]: [string, any]) => skill?.unlocked)
-    .map(([skillId]) => skillId);
-
-  for (const skillId of unlockedIds) {
-    const skillDef = SKILL_LOOKUP[skillId] || findCustomSkillById(skillId);
-    if (skillDef) {
-      byPillar[skillDef.pillar].push(skillDef);
-    }
-  }
-
+  if (!isExercisesLoaded()) return byPillar;
   for (const pillar of PILLARS) {
-    const pillarLevel = Math.max(0, Math.min(4, user?.pillarLevels?.[pillar]?.level ?? 0));
-    const currentLevelDefs = (SKILL_DEFINITIONS[pillar]?.[pillarLevel] || []).slice(0, 5);
-    const customForPillar = (customSkillsByPillar[pillar] || []).filter((skill) => {
-      const level = Number(skill?.level);
-      if (!Number.isFinite(level)) return true;
-      return level <= pillarLevel;
-    });
-    const unlockedForPillar = byPillar[pillar];
-
-    if (unlockedForPillar.length === 0) {
-      const fallback =
-        currentLevelDefs.length > 0
-          ? currentLevelDefs
-          : (SKILL_DEFINITIONS[pillar]?.[0] || []).slice(0, 5);
-      byPillar[pillar] = [...fallback, ...customForPillar];
-      continue;
-    }
-
-    const hasCurrentLevelSkill = unlockedForPillar.some((skill) => skill.level >= pillarLevel);
-    if (!hasCurrentLevelSkill) {
-      byPillar[pillar] = [...unlockedForPillar, ...currentLevelDefs, ...customForPillar];
-    } else if (customForPillar.length > 0) {
-      byPillar[pillar] = [...unlockedForPillar, ...customForPillar];
-    }
+    const pillarLevel = Math.max(0, Math.min(5, user?.pillarLevels?.[pillar]?.level ?? 0));
+    byPillar[pillar] = getExercisesForQuestSync(pillar, pillarLevel, options?.enabledEquipment);
   }
-
-  const gymSkillsByPillar = getGymSkillDefinitionsByPillar({
-    hasGymAccess: options?.hasGymAccess,
-    availableEquipment: options?.availableEquipment,
-    pillarLevels: user?.pillarLevels,
-  });
-  for (const pillar of PILLARS) {
-    const byId = new Map<string, SkillDefinition>();
-    for (const skill of byPillar[pillar]) {
-      if (!skill?.id || isDisabled(skill.id)) continue;
-      byId.set(skill.id, skill);
-    }
-    const merged = [
-      ...Array.from(byId.values()),
-      ...(gymSkillsByPillar[pillar] || []).filter((skill) => !isDisabled(skill.id)),
-    ];
-    const dedup = new Map<string, SkillDefinition>();
-    for (const skill of merged) {
-      dedup.set(normalizeText(skill.name), skill);
-    }
-    byPillar[pillar] = Array.from(dedup.values());
-  }
-
   return byPillar;
 };
 
-const pickSkillForPillar = (
-  byPillar: Record<MovementPillar, SkillDefinition[]>,
+const pickExerciseForPillar = (
+  byPillar: Record<MovementPillar, Exercise[]>,
   pillar: MovementPillar,
   index: number
 ) => {
@@ -202,11 +88,11 @@ const normalizeReps = (value: unknown, pillar: MovementPillar) => {
   return defaultRepsByPillar(pillar);
 };
 
-const normalizeSets = (value: unknown, user: any) => {
+const normalizeSets = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.max(1, Math.min(8, Math.floor(value)));
   }
-  return resolveSetCount(user?.availableTime, user?.trainingFrequency);
+  return 3;
 };
 
 // AI Generation Logic
@@ -221,38 +107,17 @@ const generateProtocol = async (
     trainingLogs: any[];
   }
 ) => {
-  const targetDailyCount = resolveDailyQuestCount(user?.availableTime);
-  const unlockedSkillsByPillar = buildUnlockedSkillsByPillar(user, {
-    hasGymAccess: user?.hasGymAccess,
-    availableEquipment: options.availableEquipment,
+  const exercisePoolByPillar = buildExercisePoolByPillar(user, {
+    enabledEquipment: options.availableEquipment,
   });
-  const activePillars = PILLARS.filter((pillar) => unlockedSkillsByPillar[pillar].length > 0);
+  const activePillars = PILLARS.filter((pillar) => exercisePoolByPillar[pillar].length > 0);
   const effectivePillars = activePillars.length > 0 ? activePillars : PILLARS;
-  const allowedSkillsForPrompt = effectivePillars.map((pillar) => ({
-    pillar,
-    skills: unlockedSkillsByPillar[pillar].map((skill) => ({
-      id: skill.id,
-      name: skill.name,
-      tags: skill.tags || [],
-      reason: skill.clinicalReason || '',
-    })),
-  }));
-  const disabledSkillsForPrompt = Object.entries(user?.skillConstraints || {})
-    .filter(([, constraint]: [string, any]) => constraint?.status === 'disabled')
-    .map(([skillId, constraint]: [string, any]) => ({
-      skillId,
-      reason: constraint?.reason || '',
-      condition: constraint?.condition || '',
-      tags: Array.isArray(constraint?.tags) ? constraint.tags : [],
-    }));
-
   if (!options.apiKey) {
-    console.warn('No API key, using fallback');
-    return fallbackQuests(user);
+    throw new Error('NO_API_KEY');
   }
 
   try {
-    // Filter history to last 10 days to avoid repeated sessions
+    // Gather recent context for the AI
     const recentHistory = history
       .filter((h) => new Date(h.completedAt).getTime() > Date.now() - 10 * 24 * 60 * 60 * 1000)
       .map((h) => ({ name: h.name, pillar: h.pillar, difficulty: h.difficulty, completedAt: h.completedAt }));
@@ -275,6 +140,28 @@ const generateProtocol = async (
         adjustment: entry.recommendedAdjustment,
       }));
 
+    // Build full exercise pool for prompt (all pillars — AI decides the split)
+    const exercisePoolForPrompt = effectivePillars.map((pillar) => ({
+      pillar,
+      count: exercisePoolByPillar[pillar].length,
+      exercises: exercisePoolByPillar[pillar].map((ex) => ({
+        id: ex.id,
+        name: ex.name,
+        muscle: ex.muscle,
+        level: ex.level,
+        equipment: ex.equipment,
+      })),
+    }));
+
+    // Summarize stats for the AI
+    const statsSummary = user.stats
+      ? Object.entries(user.stats).map(([k, v]) => `${k}: ${v}`).join(', ')
+      : 'sem dados';
+
+    const pillarLevelsSummary = user.pillarLevels
+      ? Object.entries(user.pillarLevels).map(([k, v]: [string, any]) => `${k}: lv${v?.level ?? 0} (${v?.xp ?? 0}xp)`).join(', ')
+      : 'sem dados';
+
     const response = await fetch('/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -295,36 +182,40 @@ const generateProtocol = async (
           recentTrainingDays,
           recentTrainingLogs,
         },
-        prompt: `Generate a personalized workout protocol based on current skill pool, current pillar levels, and training history.
+        prompt: `Voce e um personal trainer experiente. Monte a sessao de treino de HOJE para este usuario.
 
-USER'S CURRENT SKILL POOL: ${JSON.stringify(
-  allowedSkillsForPrompt
-)}
-DISABLED SKILLS (DO NOT PRESCRIBE): ${JSON.stringify(disabledSkillsForPrompt)}
-PILLAR LEVELS: ${JSON.stringify(user.pillarLevels)}
-ENABLED TRAINING EQUIPMENT: ${
-  options.availableEquipment.length ? options.availableEquipment.join(', ') : 'Bodyweight only'
-}
-AVAILABLE TIME: ${Number(user.availableTime) || 45} minutes
-TRAINING FREQUENCY: ${Number(user.trainingFrequency) || 3} sessions per week
+PERFIL DO USUARIO:
+- Status fisicos: ${statsSummary}
+- Niveis por pilar: ${pillarLevelsSummary}
+- Nivel de fitness: ${user.fitnessLevel || 'intermediario'}
+- Bio/historico clinico: ${user.bioData ?? user.bio ?? 'nenhum'}
+- Debuffs/lesoes: ${user.debuffs?.length ? JSON.stringify(user.debuffs) : 'nenhum'}
+- Tempo disponivel: ${Number(user.availableTime) || 45} minutos
+- Frequencia semanal: ${Number(user.trainingFrequency) || 3}x/semana
+- Equipamentos disponiveis: ${options.availableEquipment.length ? options.availableEquipment.join(', ') : 'apenas peso corporal'}
 
-RULES:
-- Respect available equipment. Do not prescribe exercises requiring unavailable equipment.
-- If no equipment is informed, default to bodyweight alternatives.
-- Use only exercise names from USER'S CURRENT SKILL POOL.
-- Never use skills listed in DISABLED SKILLS.
-- Return EXACTLY ${targetDailyCount} daily quests and exactly 1 weekly quest.
-- Every quest must contain executionGuide with clear technical instructions.
-- Vary sessions from recent history.
-- Avoid repeating the same main exercise names used in the last 10 days whenever alternatives exist.
-- Respect all debuffs/limitations.
-- Match volume to available time (${user.availableTime} min).
-- Keep frequency aligned with ${user.trainingFrequency || 3}x/week.`,
+HISTORICO RECENTE (ultimos 10 dias):
+${recentHistory.length > 0 ? JSON.stringify(recentHistory) : 'Nenhum treino recente.'}
+
+BANCO DE EXERCICIOS DISPONIVEL (use SOMENTE exercicios deste banco):
+${JSON.stringify(exercisePoolForPrompt)}
+
+INSTRUCOES:
+- Analise o perfil, status, historico recente e debuffs para decidir o foco de hoje.
+- Decida quantos exercicios sao adequados para ${Number(user.availableTime) || 45} min (considere tempo de descanso entre series).
+- Decida quantas series e repeticoes para cada exercicio com base no objetivo e tempo.
+- Escolha o split de pilares ideal considerando o que ja foi treinado recentemente.
+- Para cada exercicio, use o "id" exato do banco e preencha exerciseId.
+- Monte como um treino real: compostos antes de isolados, ordem logica de grupamentos.
+- Inclua executionGuide com cues tecnicos em portugues para cada exercicio.
+- Retorne 1 weekly quest sobre consistencia semanal.
+- NAO invente exercicios. Use SOMENTE os IDs do banco fornecido.`,
       }),
     });
 
     const data = await response.json();
     recordApiCall();
+    const wasRetried = !!data.retried;
     if (data.error) throw new Error(data.error);
 
     const result = JSON.parse(data.response);
@@ -337,46 +228,47 @@ RULES:
       recentHistory.map((entry) => normalizeText(sanitizeText(String(entry?.name || '')))).filter(Boolean)
     );
     const selectedNameSet = new Set<string>();
-    const normalizedDaily: Quest[] = Array.from({ length: targetDailyCount }).map((_, i) => {
-      const aiQuest = aiDaily[i] || {};
+    // Process ALL quests the AI returned (AI decides the count)
+    const normalizedDaily: Quest[] = aiDaily.map((aiQuest: any, i: number) => {
       const pillar: MovementPillar = isMovementPillar(aiQuest.pillar)
         ? aiQuest.pillar
         : effectivePillars[i % effectivePillars.length];
-      const allowedSkills = unlockedSkillsByPillar[pillar];
+      const exercisePool = exercisePoolByPillar[pillar];
+      // Direct ID lookup first (most reliable), then fuzzy name fallback
+      const idMatch = aiQuest.exerciseId ? getExerciseByIdSync(String(aiQuest.exerciseId)) : undefined;
       const normalizedAiName = normalizeText(sanitizeText(String(aiQuest.name || '')));
-      const matchedSkill = allowedSkills.find((skill) =>
-        normalizeText(skill.name) === normalizedAiName ||
-        normalizeText(skill.name).includes(normalizedAiName) ||
-        normalizedAiName.includes(normalizeText(skill.name))
+      const matchedExercise = idMatch || exercisePool.find((ex) =>
+        normalizeText(ex.name) === normalizedAiName ||
+        normalizeText(ex.name).includes(normalizedAiName) ||
+        normalizedAiName.includes(normalizeText(ex.name))
       );
-      const allowedUnique = allowedSkills.filter((skill) => {
-        const key = normalizeText(skill.name);
+      const uniquePool = exercisePool.filter((ex) => {
+        const key = normalizeText(ex.name);
         return key && !recentNameSet.has(key) && !selectedNameSet.has(key);
       });
-      const allowedWithoutSameRun = allowedSkills.filter((skill) => {
-        const key = normalizeText(skill.name);
+      const noRepeatPool = exercisePool.filter((ex) => {
+        const key = normalizeText(ex.name);
         return key && !selectedNameSet.has(key);
       });
-      const skillPool =
-        allowedUnique.length > 0
-          ? allowedUnique
-          : allowedWithoutSameRun.length > 0
-          ? allowedWithoutSameRun
-          : allowedSkills;
-      const matchedSkillIsAllowed =
-        matchedSkill &&
-        !recentNameSet.has(normalizeText(matchedSkill.name)) &&
-        !selectedNameSet.has(normalizeText(matchedSkill.name));
-      const selectedSkill =
-        (matchedSkillIsAllowed ? matchedSkill : undefined) ||
-        skillPool[i % Math.max(1, skillPool.length)] ||
-        pickSkillForPillar(unlockedSkillsByPillar, pillar, i);
+      const availablePool =
+        uniquePool.length > 0
+          ? uniquePool
+          : noRepeatPool.length > 0
+          ? noRepeatPool
+          : exercisePool;
+      const matchedIsAllowed =
+        matchedExercise &&
+        !recentNameSet.has(normalizeText(matchedExercise.name)) &&
+        !selectedNameSet.has(normalizeText(matchedExercise.name));
+      const selectedExercise =
+        (matchedIsAllowed ? matchedExercise : undefined) ||
+        availablePool[i % Math.max(1, availablePool.length)] ||
+        pickExerciseForPillar(exercisePoolByPillar, pillar, i);
       const selectedName = sanitizeText(
-        selectedSkill?.name || String(aiQuest.name || `${pillar.toUpperCase()} Training`)
+        selectedExercise?.name || String(aiQuest.name || `${pillar.toUpperCase()} Training`)
       );
       const selectedNameKey = normalizeText(selectedName);
       if (selectedNameKey) selectedNameSet.add(selectedNameKey);
-      const invisibleHowTo = defaultExecutionGuide(selectedName, pillar, selectedSkill?.id);
 
       return {
         id: `daily-${Date.now()}-${i}`,
@@ -388,20 +280,13 @@ RULES:
           typeof aiQuest.description === 'string' && aiQuest.description.trim()
             ? sanitizeText(aiQuest.description.trim())
             : `Progressive work focused on ${pillar}.`,
-        executionGuide: invisibleHowTo,
-        skillId: selectedSkill?.id,
-        skillLevel: selectedSkill?.level,
-        skillTags: Array.isArray(selectedSkill?.tags) ? selectedSkill.tags : undefined,
-        skillReason:
-          typeof selectedSkill?.clinicalReason === 'string' && selectedSkill.clinicalReason.trim()
-            ? selectedSkill.clinicalReason.trim()
-            : undefined,
-        sets: normalizeSets(aiQuest.sets, user),
+        executionGuide: selectedExercise?.howTo
+          || (typeof aiQuest.executionGuide === 'string' && aiQuest.executionGuide.trim() ? sanitizeText(aiQuest.executionGuide.trim()) : ''),
+        exerciseId: selectedExercise?.id,
+        previewSrc: selectedExercise?.previewSrc,
+        sets: normalizeSets(aiQuest.sets),
         reps: normalizeReps(aiQuest.reps, pillar),
-        xpReward:
-          typeof aiQuest.xpReward === 'number' && Number.isFinite(aiQuest.xpReward)
-            ? Math.max(18, Math.min(40, Math.floor(aiQuest.xpReward)))
-            : 24,
+        xpReward: selectedExercise ? (EXERCISE_XP_BY_LEVEL[selectedExercise.level] ?? 24) : 24,
         difficulty: normalizeDifficulty(aiQuest.difficulty),
         statBoost: aiQuest.statBoost || { stat: mapPillarToStat(pillar), amount: 1 },
       };
@@ -446,72 +331,19 @@ RULES:
     return {
       daily: normalizedDaily,
       weekly: normalizedWeekly,
+      retried: wasRetried,
     };
   } catch (error) {
     console.error('AI generation failed:', error);
-    return fallbackQuests(user);
+    throw error;
   }
 };
 
-const fallbackQuests = (user?: any): { daily: Quest[]; weekly: Quest[] } => {
-  const count = resolveDailyQuestCount(user?.availableTime);
-  const unlockedByPillar = buildUnlockedSkillsByPillar(user, {
-    hasGymAccess: user?.hasGymAccess,
-    availableEquipment: user?.availableEquipment || [],
-  });
-  const activePillars = PILLARS.filter((pillar) => unlockedByPillar[pillar].length > 0);
-  const effectivePillars = activePillars.length > 0 ? activePillars : PILLARS;
-
-  const daily: Quest[] = Array.from({ length: count }).map((_, i) => {
-    const pillar = effectivePillars[i % effectivePillars.length];
-    const skill = pickSkillForPillar(unlockedByPillar, pillar, i);
-    const name = skill?.name || `${pillar.toUpperCase()} Skill Quest`;
-    return {
-      id: `daily-local-${Date.now()}-${i}`,
-      name,
-      description: `Skill-based progression for ${pillar}.`,
-      executionGuide: defaultExecutionGuide(name, pillar, skill?.id),
-      skillId: skill?.id,
-      skillLevel: skill?.level,
-      skillTags: Array.isArray(skill?.tags) ? skill.tags : undefined,
-      skillReason:
-        typeof skill?.clinicalReason === 'string' && skill.clinicalReason.trim()
-          ? skill.clinicalReason.trim()
-          : undefined,
-      type: 'daily',
-      pillar,
-      sets: resolveSetCount(user?.availableTime, user?.trainingFrequency),
-      reps: defaultRepsByPillar(pillar),
-      xpReward: 24,
-      statBoost: { stat: mapPillarToStat(pillar), amount: 1 },
-      difficulty: 'medium',
-      status: 'pending',
-    };
-  });
-
-  const weeklySessions = Math.max(2, Math.min(7, Number(user?.trainingFrequency) || 3));
-  const weekly: Quest[] = [
-    {
-      id: `weekly-local-${Date.now()}`,
-      name: 'Weekly Consistency Protocol',
-      description: `Complete ${weeklySessions} sessions this week.`,
-      executionGuide: `Distribute ${weeklySessions} sessions in the week and complete all daily quests with good form.`,
-      type: 'weekly',
-      pillar: effectivePillars[0] || 'core',
-      sets: weeklySessions,
-      reps: `${weeklySessions} sessions`,
-      xpReward: 140,
-      difficulty: 'hard',
-      status: 'pending',
-    },
-  ];
-
-  return { daily, weekly };
-};
-
 export function ProtocolGenerator() {
-  const [phase, setPhase] = useState<'analyzing' | 'generated'>('analyzing');
+  const [phase, setPhase] = useState<'analyzing' | 'generated' | 'error'>('analyzing');
+  const [errorMessage, setErrorMessage] = useState('');
   const [loadingText, setLoadingText] = useState('Generating personalized protocol...');
+  const [highDemand, setHighDemand] = useState(false);
   const user = useAppStore((state) => state.user);
   const geminiApiKey = useAppStore((state) => state.geminiApiKey);
   const availableEquipment = useAppStore((state) => state.availableEquipment);
@@ -545,22 +377,38 @@ export function ProtocolGenerator() {
         if (!user) return;
         const enabledEquipment = equipmentCatalog
           .filter((item) => item.enabledForAI !== false)
-          .map((item) => item.name)
+          .map((item) => item.originalName || item.name)
           .filter(Boolean);
-        const { daily, weekly } = await generateProtocol(user, questHistory || [], {
-          apiKey: geminiApiKey,
-          availableEquipment:
-            enabledEquipment.length > 0
-              ? enabledEquipment
-              : availableEquipment.length > 0
-              ? availableEquipment
-              : user.availableEquipment || [],
-          equipmentCatalog,
-          trainingHistory,
-          trainingLogs,
-        });
-        setQuests(daily, weekly);
-        setPhase('generated');
+
+        // Show high-demand warning if it takes too long (>12s)
+        const demandTimer = setTimeout(() => setHighDemand(true), 12000);
+
+        try {
+          const { daily, weekly, retried } = await generateProtocol(user, questHistory || [], {
+            apiKey: geminiApiKey,
+            availableEquipment:
+              enabledEquipment.length > 0
+                ? enabledEquipment
+                : availableEquipment.length > 0
+                ? availableEquipment
+                : user.availableEquipment || [],
+            equipmentCatalog,
+            trainingHistory,
+            trainingLogs,
+          });
+          if (retried) setHighDemand(true);
+          clearTimeout(demandTimer);
+          setQuests(daily, weekly);
+          setPhase('generated');
+        } catch (err: any) {
+          clearTimeout(demandTimer);
+          if (err?.message === 'NO_API_KEY') {
+            setErrorMessage('Sistema superaquecido. Configure uma chave API nas configurações do perfil para gerar treinos.');
+          } else {
+            setErrorMessage(err?.message || 'Falha ao gerar protocolo de treino. Tente novamente.');
+          }
+          setPhase('error');
+        }
     };
 
     const analysisTimer = setTimeout(() => {
@@ -602,7 +450,7 @@ export function ProtocolGenerator() {
               <AlertCircle className="w-5 h-5 text-white/80" />
             </div>
             <h2 className="font-display text-lg md:text-xl tracking-wider text-white font-bold">
-              ASSESSMENT
+              GENERATING PROTOCOL
             </h2>
           </div>
         </motion.div>
@@ -676,7 +524,78 @@ export function ProtocolGenerator() {
           >
             {loadingText}
           </motion.p>
+          {highDemand && (
+            <motion.p
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-amber-400/70 text-xs font-body mt-2"
+            >
+              Alta demanda detectada — a resposta pode demorar um pouco mais.
+            </motion.p>
+          )}
         </motion.div>
+      </div>
+    );
+  }
+
+  // Error phase
+  if (phase === 'error') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="notification-popup mb-8 px-8 py-4"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 border-2 border-red-500/60 flex items-center justify-center">
+              <AlertCircle className="w-5 h-5 text-red-400" />
+            </div>
+            <h2 className="font-display text-lg md:text-xl tracking-wider text-red-400 font-bold">
+              SYSTEM OVERLOAD
+            </h2>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="text-center max-w-md mb-8"
+        >
+          <p className="text-white/70 font-body leading-relaxed">
+            {errorMessage}
+          </p>
+        </motion.div>
+
+        <div className="flex gap-4">
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            onClick={() => {
+              setPhase('analyzing');
+              setErrorMessage('');
+              setHighDemand(false);
+            }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="px-8 py-3 font-display text-sm tracking-wider border-2 border-amber-500/60 text-amber-400 hover:border-amber-400 hover:shadow-[0_0_15px_rgba(245,158,11,0.2)] transition-all"
+          >
+            TENTAR NOVAMENTE
+          </motion.button>
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            onClick={() => setScreen('dashboard')}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="px-8 py-3 font-display text-sm tracking-wider border-2 border-white/20 text-white/60 hover:border-white/40 transition-all"
+          >
+            VOLTAR
+          </motion.button>
+        </div>
       </div>
     );
   }

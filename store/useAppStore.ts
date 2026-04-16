@@ -19,13 +19,14 @@ import type {
   SkillDefinition,
   SkillConstraint
 } from '@/types';
-import { ATHLETE_TIER_THRESHOLDS, BASE_PILLAR_LEVELS, PILLAR_NAMES } from '@/types';
+import { ATHLETE_TIER_THRESHOLDS, BASE_PILLAR_LEVELS, PILLAR_NAMES, EXERCISE_XP_BY_LEVEL } from '@/types';
 import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
 import { sanitizeText } from '@/lib/textSanitizer';
-import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog } from '@/lib/equipmentCatalog';
+import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog, translateEquipmentName, COMMON_GYM_EQUIPMENT, inferEquipmentCategory } from '@/lib/equipmentCatalog';
 import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
 import { getInvisibleSkillHowTo } from '@/lib/skillHowTo';
 import { recordApiCall } from '@/lib/engineUsageTracker';
+import { getExercisesForQuestSync, getExerciseByIdSync, isExercisesLoaded } from '@/lib/exerciseService';
 
 interface AppState {
   // App State
@@ -62,6 +63,7 @@ interface AppState {
 
   // Training History
   trainingHistory: TrainingDay[];
+  lastWeeklyPenaltyCheck?: string; // ISO week key e.g. "2026-W15"
 
   // Actions: access
   setGeminiApiKey: (key: string) => void;
@@ -123,9 +125,12 @@ interface AppState {
   // Equipment Actions
   equipItem: (itemId: string) => void;
   unequipItem: (itemId: string) => void;
+  syncEquipmentFromExercises: (exerciseEquipmentTypes: string[]) => void;
 
   // Training Actions
   recordTrainingDay: (day: TrainingDay) => void;
+  setTrainingFrequency: (freq: number) => void;
+  checkWeeklyPenalty: () => { penaltyApplied: boolean; xpLost: number; sessionsDone: number; sessionsGoal: number } | null;
 
   // Reset
   resetApp: () => void;
@@ -200,7 +205,7 @@ const normalizeEquipmentList = (items: string[]) =>
 const resolveEnabledEquipmentNames = (equipment: Equipment[], fallback: string[]) => {
   const enabledNames = equipment
     .filter((item) => item.enabledForAI !== false)
-    .map((item) => item.name)
+    .map((item) => item.originalName || item.name)
     .filter(Boolean);
   return normalizeEquipmentList(enabledNames.length > 0 ? enabledNames : fallback);
 };
@@ -553,10 +558,26 @@ export const useAppStore = create<AppState>()(
           user: state.user ? { ...state.user, geminiApiKey: key } : state.user,
         })),
       setGymAccess: (hasAccess) =>
-        set((state) => ({
-          hasGymAccess: hasAccess,
-          user: state.user ? { ...state.user, hasGymAccess: hasAccess } : state.user,
-        })),
+        set((state) => {
+          // Auto-enable common gym equipment when gym access is granted
+          const updatedEquipment = hasAccess
+            ? state.equipment.map((eq) => {
+                const origName = eq.originalName || eq.name;
+                if (COMMON_GYM_EQUIPMENT.includes(origName) && !eq.enabledForAI) {
+                  return { ...eq, enabledForAI: true };
+                }
+                return eq;
+              })
+            : state.equipment;
+          const enabledEquipment = resolveEnabledEquipmentNames(updatedEquipment, state.availableEquipment);
+          return {
+            hasGymAccess: hasAccess,
+            equipment: updatedEquipment,
+            user: state.user
+              ? { ...state.user, hasGymAccess: hasAccess, availableEquipment: enabledEquipment }
+              : state.user,
+          };
+        }),
       setAvailableEquipment: (items) => {
         const normalized = normalizeEquipmentList(items);
         const equipmentCatalog = normalizeEquipmentCatalog(
@@ -1000,9 +1021,13 @@ export const useAppStore = create<AppState>()(
       // Quests
       setQuests: (daily, weekly) => set({ dailyQuests: daily, weeklyQuests: weekly }),
 
+      /** @deprecated Use ProtocolGenerator (AI-based) instead. Kept for interface compat. */
       generatePMFQuests: ({ priorityPillars = ['push', 'pull', 'core'], painAreas = [], hasGymAccess }) => {
         const { user, pillarLevels, equipment, availableEquipment, questHistory } = get();
         if (!user) return;
+
+        // Check weekly penalty when generating new quests (new week starts)
+        get().checkWeeklyPenalty();
 
         const sortedPillars = ALL_PILLARS
           .filter(p => !painAreas.includes(p))
@@ -1014,7 +1039,6 @@ export const useAppStore = create<AppState>()(
         const effectivePillars = activePillars.length > 0 ? activePillars : ALL_PILLARS;
         const questCount = resolveDailyQuestCount(user.availableTime);
         const sets = resolveSetCount(user.availableTime, user.trainingFrequency);
-        const usesEquipment = Boolean(hasGymAccess ?? get().hasGymAccess);
         const enabledEquipment = resolveEnabledEquipmentNames(equipment, availableEquipment);
         const tenDaysAgo = Date.now() - 10 * DAY_IN_MS;
         const recentQuestNames = new Set(
@@ -1024,9 +1048,55 @@ export const useAppStore = create<AppState>()(
         );
         const selectedInRun = new Set<string>();
 
+        // Use exercise database if loaded, otherwise fall back to old skill system
+        const useExerciseDB = isExercisesLoaded();
+
         const daily: Quest[] = Array.from({ length: questCount }).map((_, index) => {
           const pillar = effectivePillars[index % effectivePillars.length];
-          const skillPool = getSkillPoolByPillar(user, pillar, usesEquipment, enabledEquipment);
+          const level = pillarLevels[pillar].level;
+          const difficulty: 'easy' | 'medium' | 'hard' =
+            level <= 1 ? 'easy' : level >= 3 ? 'hard' : 'medium';
+          const reps = defaultRepsByPillar(pillar);
+
+          if (useExerciseDB) {
+            // New exercise-based quest generation
+            const exercisePool = getExercisesForQuestSync(pillar, level, enabledEquipment);
+            const candidatePool = exercisePool.filter((ex) => {
+              const norm = normalizeText(ex.name);
+              return !recentQuestNames.has(norm) && !selectedInRun.has(norm);
+            });
+            const finalPool = candidatePool.length > 0 ? candidatePool : exercisePool;
+            const selectedExercise = finalPool[index % Math.max(1, finalPool.length)];
+            const exerciseName = sanitizeText(selectedExercise?.name || `${PILLAR_NAMES[pillar]} Exercise`);
+            selectedInRun.add(normalizeText(exerciseName));
+            const xp = EXERCISE_XP_BY_LEVEL[selectedExercise?.level ?? 0] ?? 10;
+
+            return {
+              id: `pmf-daily-${pillar}-${Date.now()}-${index}`,
+              name: exerciseName,
+              description: sanitizeText(
+                `${selectedExercise?.muscle || pillar} exercise. Equipment: ${
+                  selectedExercise?.equipment?.join(', ') || 'bodyweight'
+                }.`
+              ),
+              executionGuide: selectedExercise?.howTo || defaultExecutionGuide(exerciseName, pillar),
+              exerciseId: selectedExercise?.id,
+              previewSrc: selectedExercise?.previewSrc,
+              skillId: selectedExercise?.id,
+              skillLevel: selectedExercise?.level,
+              type: 'daily',
+              pillar,
+              sets,
+              reps,
+              xpReward: xp,
+              statBoost: { stat: mapPillarToStat(pillar), amount: 1 },
+              difficulty,
+              status: 'pending',
+            };
+          }
+
+          // Fallback: old skill system
+          const skillPool = getSkillPoolByPillar(user, pillar, Boolean(hasGymAccess ?? get().hasGymAccess), enabledEquipment);
           const candidatePool =
             skillPool.filter((skill) => {
               const normalizedName = normalizeText(skill.name);
@@ -1041,10 +1111,6 @@ export const useAppStore = create<AppState>()(
           const selectedSkill = finalPool[index % Math.max(1, finalPool.length)];
           const exerciseName = sanitizeText(selectedSkill?.name || `${PILLAR_NAMES[pillar]} Skill`);
           selectedInRun.add(normalizeText(exerciseName));
-          const level = pillarLevels[pillar].level;
-          const difficulty: 'easy' | 'medium' | 'hard' =
-            level <= 1 ? 'easy' : level >= 3 ? 'hard' : 'medium';
-          const reps = defaultRepsByPillar(pillar);
           const xp = Math.min(40, Math.max(18, 20 + level * 5));
 
           return {
@@ -1052,7 +1118,7 @@ export const useAppStore = create<AppState>()(
             name: exerciseName,
             description: sanitizeText(
               `Progression on ${PILLAR_NAMES[pillar]} with unlocked skills. Equipment mode: ${
-                usesEquipment ? 'gym/accessories' : 'bodyweight'
+                Boolean(hasGymAccess ?? get().hasGymAccess) ? 'gym/accessories' : 'bodyweight'
               }.`
             ),
             executionGuide: defaultExecutionGuide(exerciseName, pillar, selectedSkill?.id),
@@ -1099,11 +1165,9 @@ export const useAppStore = create<AppState>()(
         set({
           dailyQuests: daily,
           weeklyQuests: weekly,
-          hasGymAccess: usesEquipment,
           availableEquipment,
           user: {
             ...user,
-            hasGymAccess: usesEquipment,
             availableEquipment,
             availableTime: user.availableTime,
             trainingFrequency: user.trainingFrequency,
@@ -1148,28 +1212,36 @@ export const useAppStore = create<AppState>()(
           get().unlockSkill(quest.skillId);
         }
         
-        // Add skill XP based on quest
-        const latestUser = get().user;
-        if (latestUser?.userSkills) {
-          if (quest.skillId && latestUser.userSkills[quest.skillId]?.unlocked) {
-            get().addSkillXP(quest.skillId, resolveSkillXpGainByDifficulty(quest.difficulty));
-          } else {
-            const pillarSkills = SKILL_DEFINITIONS[quest.pillar];
-            const levelSkills = (pillarSkills[questPillarLevelBefore] || []).filter(
-              (skillDef) => latestUser.userSkills[skillDef.id]?.unlocked
-            );
-            if (levelSkills.length > 0) {
-              const normalizedQuestName = normalizeText(quest.name);
-              const matchedSkill = levelSkills.find((skillDef) => {
-                const normalizedSkillName = normalizeText(skillDef.name);
-                return (
-                  normalizedSkillName === normalizedQuestName ||
-                  normalizedSkillName.includes(normalizedQuestName) ||
-                  normalizedQuestName.includes(normalizedSkillName)
-                );
-              });
-              const targetSkill = matchedSkill || levelSkills[0];
-              get().addSkillXP(targetSkill.id, resolveSkillXpGainByDifficulty(quest.difficulty));
+        // Add skill XP: if quest has an exerciseId, use it directly; otherwise fallback to old logic
+        if (quest.exerciseId) {
+          // New exercise-based: auto-unlock and add mastery XP
+          if (!user.userSkills?.[quest.exerciseId]?.unlocked) {
+            get().unlockSkill(quest.exerciseId);
+          }
+          get().addSkillXP(quest.exerciseId, resolveSkillXpGainByDifficulty(quest.difficulty));
+        } else {
+          const latestUser = get().user;
+          if (latestUser?.userSkills) {
+            if (quest.skillId && latestUser.userSkills[quest.skillId]?.unlocked) {
+              get().addSkillXP(quest.skillId, resolveSkillXpGainByDifficulty(quest.difficulty));
+            } else {
+              const pillarSkills = SKILL_DEFINITIONS[quest.pillar];
+              const levelSkills = (pillarSkills[questPillarLevelBefore] || []).filter(
+                (skillDef) => latestUser.userSkills[skillDef.id]?.unlocked
+              );
+              if (levelSkills.length > 0) {
+                const normalizedQuestName = normalizeText(quest.name);
+                const matchedSkill = levelSkills.find((skillDef) => {
+                  const normalizedSkillName = normalizeText(skillDef.name);
+                  return (
+                    normalizedSkillName === normalizedQuestName ||
+                    normalizedSkillName.includes(normalizedQuestName) ||
+                    normalizedQuestName.includes(normalizedSkillName)
+                  );
+                });
+                const targetSkill = matchedSkill || levelSkills[0];
+                get().addSkillXP(targetSkill.id, resolveSkillXpGainByDifficulty(quest.difficulty));
+              }
             }
           }
         }
@@ -1363,6 +1435,49 @@ export const useAppStore = create<AppState>()(
         });
       },
 
+      syncEquipmentFromExercises: (exerciseEquipmentTypes) => {
+        set((state) => {
+          const hasGym = state.hasGymAccess ?? state.user?.hasGymAccess ?? false;
+          // Build a lookup from both original and translated names
+          const existingByOriginal = new Map(state.equipment.map((e) => [e.name, e]));
+          // Also check by translated name in case equipment was already stored with EN name
+          const existingByKey = new Map(state.equipment.map((e) => [e.id, e]));
+          const merged: Equipment[] = exerciseEquipmentTypes.map((originalName) => {
+            const displayName = translateEquipmentName(originalName);
+            // Check if we already have this equipment (by original or translated name)
+            const existing = existingByOriginal.get(originalName) || existingByOriginal.get(displayName);
+            if (existing) {
+              // Update name to PT-BR and ensure originalName is set
+              return { ...existing, name: displayName, originalName: existing.originalName || originalName };
+            }
+            const isCommonGym = COMMON_GYM_EQUIPMENT.includes(originalName);
+            return {
+              id: `eq-${originalName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+              name: displayName,
+              originalName,
+              category: inferEquipmentCategory(originalName),
+              equipped: hasGym && isCommonGym,
+              enabledForAI: hasGym && isCommonGym,
+              source: 'system' as const,
+            };
+          });
+          // Keep any custom equipment not in exercise DB
+          const mergedNames = new Set(merged.map((e) => e.id));
+          for (const e of state.equipment) {
+            if (!mergedNames.has(e.id) && !exerciseEquipmentTypes.includes(e.name)) {
+              merged.push(e);
+            }
+          }
+          const enabledEquipment = resolveEnabledEquipmentNames(merged, state.availableEquipment);
+          return {
+            equipment: merged,
+            user: state.user
+              ? { ...state.user, availableEquipment: enabledEquipment }
+              : state.user,
+          };
+        });
+      },
+
       // Training
       recordTrainingDay: (day) => {
         set((state) => {
@@ -1379,6 +1494,83 @@ export const useAppStore = create<AppState>()(
               : state.user,
           };
         });
+      },
+
+      setTrainingFrequency: (freq) => {
+        const clamped = Math.max(2, Math.min(7, freq));
+        set((state) => ({
+          user: state.user
+            ? { ...state.user, trainingFrequency: clamped }
+            : state.user,
+        }));
+      },
+
+      checkWeeklyPenalty: () => {
+        const { user, trainingHistory, lastWeeklyPenaltyCheck } = get();
+        if (!user) return null;
+
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0=Sun
+        const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+        // Current week key (ISO week)
+        const currentMonday = new Date(now);
+        currentMonday.setDate(now.getDate() - mondayOffset);
+        currentMonday.setHours(0, 0, 0, 0);
+        const weekKey = `${currentMonday.getFullYear()}-W${Math.ceil(
+          ((currentMonday.getTime() - new Date(currentMonday.getFullYear(), 0, 1).getTime()) / 86400000 + 1) / 7
+        )}`;
+
+        // Already checked this week
+        if (lastWeeklyPenaltyCheck === weekKey) {
+          return null;
+        }
+
+        // Previous week boundaries
+        const prevWeekEnd = new Date(currentMonday);
+        const prevWeekStart = new Date(prevWeekEnd);
+        prevWeekStart.setDate(prevWeekEnd.getDate() - 7);
+
+        const sessionsGoal = Math.max(2, Math.min(7, Number(user.trainingFrequency) || 3));
+
+        // Count unique training days in previous week
+        const sessionsDone = new Set(
+          trainingHistory
+            .filter((day) => {
+              const d = new Date(day.date);
+              return d >= prevWeekStart && d < prevWeekEnd && day.questsCompleted > 0;
+            })
+            .map((day) => normalizeDateToDayKey(day.date))
+        ).size;
+
+        // Mark as checked for this week
+        set({ lastWeeklyPenaltyCheck: weekKey });
+
+        if (sessionsDone >= sessionsGoal) {
+          return { penaltyApplied: false, xpLost: 0, sessionsDone, sessionsGoal };
+        }
+
+        // Only apply penalty if there's actual training history before this week
+        const hasAnyHistory = trainingHistory.some((day) => {
+          const d = new Date(day.date);
+          return d < prevWeekEnd;
+        });
+
+        if (!hasAnyHistory) {
+          return { penaltyApplied: false, xpLost: 0, sessionsDone, sessionsGoal };
+        }
+
+        // Penalty: 50 XP per missed session
+        const missedSessions = sessionsGoal - sessionsDone;
+        const xpLost = missedSessions * 50;
+
+        const latestUser = get().user;
+        if (latestUser) {
+          const newExp = Math.max(0, latestUser.exp - xpLost);
+          set({ user: { ...latestUser, exp: newExp } });
+        }
+
+        return { penaltyApplied: true, xpLost, sessionsDone, sessionsGoal };
       },
 
       // Skill System

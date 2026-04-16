@@ -80,6 +80,8 @@ export interface Quest {
   name: string;
   description: string;
   executionGuide?: string;
+  exerciseId?: string;
+  previewSrc?: string;
   skillId?: string;
   skillLevel?: number;
   skillTags?: string[];
@@ -222,6 +224,8 @@ export type EquipmentCategory =
 export interface Equipment {
   id: string;
   name: string;
+  /** Original English name from exercises.json (used for exercise filtering) */
+  originalName?: string;
   category?: EquipmentCategory;
   notes?: string;
   enabledForAI?: boolean;
@@ -312,4 +316,27 @@ export const STAT_COLORS: Record<keyof UserStats, string> = {
   core: '#3b82f6',
   endurance: '#8b5cf6',
   mobility: '#06b6d4',
+};
+
+// Exercise database types (916 exercises)
+export interface Exercise {
+  id: string;
+  name: string;
+  equipment: string[];
+  level: number; // 0-5
+  muscle: string;
+  pillar: MovementPillar;
+  howTo: string;
+  previewSrc: string;
+  videoLink: string;
+}
+
+// Fixed XP per exercise level
+export const EXERCISE_XP_BY_LEVEL: Record<number, number> = {
+  0: 10,
+  1: 20,
+  2: 35,
+  3: 55,
+  4: 80,
+  5: 110,
 };

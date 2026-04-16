@@ -6,6 +6,8 @@ import ReactMarkdown from 'react-markdown';
 import { useAppStore } from '@/store/useAppStore';
 import { createSystemChat } from '@/lib/systemChatService';
 import { recordApiCall } from '@/lib/engineUsageTracker';
+import { getExercisesForQuestSync, getExerciseByIdSync, isExercisesLoaded } from '@/lib/exerciseService';
+import { EXERCISE_XP_BY_LEVEL } from '@/types';
 import {
   ChatMessage,
   Quest,
@@ -36,6 +38,7 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [processingTool, setProcessingTool] = useState(false);
+  const [highDemand, setHighDemand] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInstance = useRef<any>(null);
@@ -72,37 +75,32 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
           case 'get_user_state':
             const currentState = useAppStore.getState();
             const pillarsForCatalog: MovementPillar[] = ['push', 'pull', 'core', 'legs', 'mobility', 'endurance'];
-            const staticSkillCatalog = pillarsForCatalog.flatMap((pillar) =>
-              Object.values(SKILL_DEFINITIONS[pillar] || {})
-                .flatMap((defs) => defs || [])
-                .map((skill) => ({
-                  id: skill.id,
-                  name: skill.name,
-                  pillar: skill.pillar,
-                  level: skill.level,
-                  source: skill.source || 'core',
-                }))
-            );
-            const customSkillCatalog = pillarsForCatalog.flatMap((pillar) =>
-              (currentState.user?.customSkills?.[pillar] || []).map((skill) => ({
-                id: skill.id,
-                name: skill.name,
-                pillar: skill.pillar,
-                level: skill.level,
-                source: skill.source || 'adaptive-ai',
-                tags: skill.tags || [],
-                reason: skill.clinicalReason || '',
-              }))
-            );
+
+            // Build exercise pool from DB (filtered by level + equipment)
+            const enabledEquipNames = currentState.equipment
+              .filter((eq) => eq.enabledForAI !== false)
+              .map((eq) => eq.originalName || eq.name)
+              .filter(Boolean);
+            const exercisePool: Record<string, any[]> = {};
+            if (isExercisesLoaded()) {
+              for (const pillar of pillarsForCatalog) {
+                const pLevel = currentState.pillarLevels?.[pillar]?.level ?? 0;
+                exercisePool[pillar] = getExercisesForQuestSync(pillar, pLevel, enabledEquipNames).map((ex) => ({
+                  id: ex.id,
+                  name: ex.name,
+                  muscle: ex.muscle,
+                  level: ex.level,
+                  equipment: ex.equipment,
+                }));
+              }
+            }
+
             result = { 
                 result: JSON.stringify({
                     profile: currentState.user,
                     quests: { daily: currentState.dailyQuests, weekly: currentState.weeklyQuests },
                     progress: currentState.pillarLevels,
-                    skills: currentState.user?.userSkills || {},
-                    customSkills: currentState.user?.customSkills || {},
-                    skillConstraints: currentState.user?.skillConstraints || {},
-                    skillCatalog: [...staticSkillCatalog, ...customSkillCatalog],
+                    exercisePool,
                     recovery: currentState.recoveryStatus,
                     equipment: {
                       hasGymAccess: currentState.hasGymAccess,
@@ -110,9 +108,8 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
                       inventory: currentState.equipment,
                     },
                     history: {
-                      questHistory: currentState.questHistory,
-                      trainingHistory: currentState.trainingHistory,
-                      trainingLogs: currentState.trainingLogs,
+                      questHistory: currentState.questHistory?.slice(-20),
+                      trainingHistory: currentState.trainingHistory?.slice(-10),
                       lastCheckIn: currentState.lastCheckIn,
                     },
                 }) 
@@ -682,52 +679,52 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
 
           case 'manage_quests':
             if (args.action === 'add' && args.questData) {
-                const normalizedXpReward =
-                    typeof args.questData.xpReward === 'number' && Number.isFinite(args.questData.xpReward)
-                        ? Math.max(18, Math.min(40, Math.floor(args.questData.xpReward)))
-                        : 24;
+                // Lookup exercise from DB by ID
+                const exerciseFromDB = args.questData.exerciseId
+                  ? getExerciseByIdSync(String(args.questData.exerciseId))
+                  : undefined;
+
+                const questPillar = exerciseFromDB?.pillar || args.questData.pillar || 'push';
+                const questXp = exerciseFromDB
+                  ? (EXERCISE_XP_BY_LEVEL[exerciseFromDB.level] ?? 24)
+                  : typeof args.questData.xpReward === 'number' && Number.isFinite(args.questData.xpReward)
+                    ? Math.max(10, Math.min(110, Math.floor(args.questData.xpReward)))
+                    : 24;
+
                 const newQuest: Quest = {
                     id: crypto.randomUUID(),
-                    name: args.questData.title || "System Directive",
-                    description: args.questData.description || "Auto-generated task",
-                    executionGuide: args.questData.executionGuide || "Execute com tecnica controlada e sem dor.",
-                    xpReward: normalizedXpReward,
-                    skillId:
-                      typeof args.questData.skillId === 'string' ? args.questData.skillId : undefined,
-                    skillLevel:
-                      typeof args.questData.skillLevel === 'number'
-                        ? Math.max(0, Math.floor(args.questData.skillLevel))
-                        : undefined,
-                    skillTags: Array.isArray(args.questData.skillTags)
-                      ? args.questData.skillTags.map((entry: unknown) => String(entry).trim()).filter(Boolean)
-                      : undefined,
-                    skillReason:
-                      typeof args.questData.skillReason === 'string' && args.questData.skillReason.trim()
-                        ? args.questData.skillReason.trim()
-                        : undefined,
+                    name: exerciseFromDB?.name || args.questData.title || 'System Directive',
+                    description: args.questData.description || (exerciseFromDB ? `${exerciseFromDB.muscle} exercise.` : 'Auto-generated task'),
+                    executionGuide: exerciseFromDB?.howTo || args.questData.executionGuide || '',
+                    exerciseId: exerciseFromDB?.id,
+                    previewSrc: exerciseFromDB?.previewSrc,
+                    xpReward: questXp,
                     type: 'daily',
                     difficulty: (args.questData.difficulty as any) || 'medium',
                     status: 'pending',
-                    pillar: (args.questData.pillar as any) || 'endurance',
-                    sets: 3,
-                    reps: '10-12',
+                    pillar: questPillar as any,
+                    sets: typeof args.questData.sets === 'number' ? Math.max(1, Math.min(8, args.questData.sets)) : 3,
+                    reps: typeof args.questData.reps === 'string' ? args.questData.reps : '10-12',
                 };
                 useAppStore.setState((state) => ({
                     dailyQuests: [...state.dailyQuests, newQuest]
                 }));
-                result = { result: `Quest '${newQuest.name}' added to protocol.` };
+                result = { result: exerciseFromDB
+                  ? `Quest '${newQuest.name}' (ID: ${exerciseFromDB.id}) adicionada ao protocolo com GIF e guia de execucao.`
+                  : `Quest '${newQuest.name}' adicionada. AVISO: exerciseId nao encontrado no banco \u2014 sem GIF/guia.`
+                };
             } else if (args.action === 'update' && args.questId && args.questData) {
+                const updateExercise = args.questData.exerciseId
+                  ? getExerciseByIdSync(String(args.questData.exerciseId))
+                  : undefined;
+
                 const normalizeQuest = (quest: Quest): Quest => {
                   if (quest.id !== args.questId) return quest;
-                  const normalizedXpReward =
-                    typeof args.questData.xpReward === 'number' && Number.isFinite(args.questData.xpReward)
-                      ? Math.max(18, Math.min(220, Math.floor(args.questData.xpReward)))
-                      : quest.xpReward;
-                  const nextPillar =
-                    typeof args.questData.pillar === 'string' &&
-                    ['push', 'pull', 'core', 'legs', 'mobility', 'endurance'].includes(args.questData.pillar)
-                      ? (args.questData.pillar as Quest['pillar'])
-                      : quest.pillar;
+                  const nextPillar = updateExercise?.pillar
+                    || (typeof args.questData.pillar === 'string' &&
+                      ['push', 'pull', 'core', 'legs', 'mobility', 'endurance'].includes(args.questData.pillar)
+                        ? (args.questData.pillar as Quest['pillar'])
+                        : quest.pillar);
                   const nextDifficulty =
                     args.questData.difficulty === 'easy' ||
                     args.questData.difficulty === 'medium' ||
@@ -737,41 +734,38 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
 
                   return {
                     ...quest,
-                    name:
-                      typeof args.questData.title === 'string' && args.questData.title.trim()
+                    name: updateExercise?.name
+                      || (typeof args.questData.title === 'string' && args.questData.title.trim()
                         ? args.questData.title.trim()
-                        : quest.name,
+                        : quest.name),
                     description:
                       typeof args.questData.description === 'string' && args.questData.description.trim()
                         ? args.questData.description.trim()
                         : quest.description,
-                    executionGuide:
-                      typeof args.questData.executionGuide === 'string' && args.questData.executionGuide.trim()
+                    executionGuide: updateExercise?.howTo
+                      || (typeof args.questData.executionGuide === 'string' && args.questData.executionGuide.trim()
                         ? args.questData.executionGuide.trim()
-                        : quest.executionGuide,
-                    xpReward: normalizedXpReward,
+                        : quest.executionGuide),
+                    exerciseId: updateExercise?.id || quest.exerciseId,
+                    previewSrc: updateExercise?.previewSrc || quest.previewSrc,
+                    xpReward: updateExercise
+                      ? (EXERCISE_XP_BY_LEVEL[updateExercise.level] ?? quest.xpReward)
+                      : (typeof args.questData.xpReward === 'number' && Number.isFinite(args.questData.xpReward)
+                        ? Math.max(10, Math.min(220, Math.floor(args.questData.xpReward)))
+                        : quest.xpReward),
                     pillar: nextPillar,
                     difficulty: nextDifficulty,
-                    skillId:
-                      typeof args.questData.skillId === 'string' ? args.questData.skillId : quest.skillId,
-                    skillLevel:
-                      typeof args.questData.skillLevel === 'number'
-                        ? Math.max(0, Math.floor(args.questData.skillLevel))
-                        : quest.skillLevel,
-                    skillTags: Array.isArray(args.questData.skillTags)
-                      ? args.questData.skillTags.map((entry: unknown) => String(entry).trim()).filter(Boolean)
-                      : quest.skillTags,
-                    skillReason:
-                      typeof args.questData.skillReason === 'string' && args.questData.skillReason.trim()
-                        ? args.questData.skillReason.trim()
-                        : quest.skillReason,
+                    sets: typeof args.questData.sets === 'number'
+                      ? Math.max(1, Math.min(8, args.questData.sets))
+                      : quest.sets,
+                    reps: typeof args.questData.reps === 'string' ? args.questData.reps : quest.reps,
                   };
                 };
                 useAppStore.setState((state) => ({
                   dailyQuests: state.dailyQuests.map(normalizeQuest),
                   weeklyQuests: state.weeklyQuests.map(normalizeQuest),
                 }));
-                result = { result: `Quest '${args.questId}' updated.` };
+                result = { result: `Quest '${args.questId}' atualizada.` };
             } else if (args.action === 'remove' && args.questId) {
                 useAppStore.setState((state) => ({
                     dailyQuests: state.dailyQuests.filter(q => q.id !== args.questId),
@@ -864,6 +858,30 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
     return responses;
   };
 
+  /** Retry-aware wrapper: retries on 503/UNAVAILABLE up to maxRetries times */
+  const sendWithRetry = async (
+    payload: any,
+    maxRetries = 2
+  ): Promise<any> => {
+    const RETRY_DELAYS = [2000, 4000];
+    let lastError: any;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await chatInstance.current.sendMessage(payload);
+        recordApiCall();
+        return result;
+      } catch (err: any) {
+        lastError = err;
+        const msg = String(err?.message || err || '');
+        const isRetryable = /503|UNAVAILABLE|high demand|overloaded/i.test(msg);
+        if (!isRetryable || attempt >= maxRetries) throw err;
+        setHighDemand(true);
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt] ?? 4000));
+      }
+    }
+    throw lastError;
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isLoading || !apiKey) return;
 
@@ -877,26 +895,25 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
+    setHighDemand(false);
 
     try {
       if (!chatInstance.current) {
         chatInstance.current = createSystemChat(apiKey, messages); 
       }
       
-      let result = await chatInstance.current.sendMessage({ message: userMsg.text });
-      recordApiCall();
+      let result = await sendWithRetry({ message: userMsg.text });
       
       let functionCalls = result?.functionCalls;
       
       while (functionCalls && functionCalls.length > 0) {
         const toolResponses = await executeTools(functionCalls);
         
-        result = await chatInstance.current.sendMessage({
+        result = await sendWithRetry({
           message: toolResponses.map(tr => ({
             functionResponse: tr
           }))
         });
-        recordApiCall();
         
         functionCalls = result?.functionCalls;
       }
@@ -912,15 +929,20 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
 
     } catch (e) {
       console.error(e);
+      const errMsg = String((e as any)?.message || e || '');
+      const is503 = /503|UNAVAILABLE|high demand/i.test(errMsg);
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'model',
-        text: "CONNECTION INTERRUPTED. Check API Key or Network.",
+        text: is503
+          ? "SYSTEM OVERLOAD — Alta demanda detectada. Tente novamente em alguns segundos."
+          : "CONNECTION INTERRUPTED. Check API Key or Network.",
         timestamp: Date.now()
       }]);
     } finally {
       setIsLoading(false);
       setProcessingTool(false);
+      setHighDemand(false);
     }
   };
 
@@ -989,17 +1011,35 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
               
               {(isLoading || processingTool) && (
                  <div className="flex justify-start">
-                   <div className="bg-shadow-800 px-4 py-3 rounded-lg rounded-bl-none border border-white/10 flex items-center gap-3">
-                     {processingTool ? (
-                        <>
-                          <Terminal className="w-4 h-4 animate-pulse text-neon-purple" />
-                          <span className="text-xs text-neon-purple font-mono">EXECUTING PROTOCOLS...</span>
-                        </>
-                     ) : (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-neon-blue" />
-                          <span className="text-xs text-neon-blue font-mono">PROCESSING...</span>
-                        </>
+                   <div className={`bg-shadow-800 px-4 py-3 rounded-lg rounded-bl-none border flex flex-col gap-2 ${
+                     highDemand ? 'border-amber-500/30' : 'border-white/10'
+                   }`}>
+                     <div className="flex items-center gap-3">
+                       {processingTool ? (
+                          <>
+                            <Terminal className="w-4 h-4 animate-pulse text-neon-purple" />
+                            <span className="text-xs text-neon-purple font-mono">EXECUTING PROTOCOLS...</span>
+                          </>
+                       ) : (
+                          <>
+                            <Loader2 className={`w-4 h-4 animate-spin ${highDemand ? 'text-amber-400' : 'text-neon-blue'}`} />
+                            <span className={`text-xs font-mono ${highDemand ? 'text-amber-400' : 'text-neon-blue'}`}>
+                              {highDemand ? 'RETRYING...' : 'PROCESSING...'}
+                            </span>
+                          </>
+                       )}
+                     </div>
+                     {highDemand && (
+                       <div className="flex items-center gap-2">
+                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="flex-shrink-0">
+                           <path d="M7 1L1 13h12L7 1z" stroke="#f59e0b" strokeWidth="1.2" fill="none" />
+                           <line x1="7" y1="5.5" x2="7" y2="8.5" stroke="#f59e0b" strokeWidth="1.2" strokeLinecap="round" />
+                           <circle cx="7" cy="10.5" r="0.6" fill="#f59e0b" />
+                         </svg>
+                         <span className="text-[10px] text-amber-400/80 font-mono leading-tight">
+                           Alta demanda — vai demorar um pouco mais
+                         </span>
+                       </div>
                      )}
                    </div>
                  </div>
@@ -1008,7 +1048,7 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
             </div>
 
             {/* Input */}
-            <GlassPanel className="p-4 border-t border-white/10 !bg-shadow-800/80 !rounded-none">
+            <GlassPanel className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-white/10 !bg-shadow-800/80 !rounded-none">
               <div className="flex items-center gap-2 relative">
                 <textarea
                   value={input}

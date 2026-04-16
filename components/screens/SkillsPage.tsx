@@ -1,526 +1,485 @@
-'use client';
+﻿'use client';
 
-import { motion } from 'framer-motion';
-import { 
+import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
   Flame,
   Zap,
   Shield,
   Heart,
   Move,
   Dumbbell,
+  Search,
+  X,
+  ExternalLink,
+  ChevronRight,
+  Filter,
   Lock,
-  HelpCircle,
-  ChevronDown,
-  ChevronUp,
-  Trophy,
-  AlertTriangle,
-  Star,
-  Target
 } from 'lucide-react';
 import { GlassPanel } from '@/components/ui/CyberFrame';
 import { useAppStore } from '@/store/useAppStore';
-import { PILLAR_NAMES, type MovementPillar, type SkillDefinition } from '@/types';
-import { SKILL_DEFINITIONS, LEVEL_UP_CHALLENGES } from '@/lib/skillDefinitions';
-import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
-import { recordApiCall } from '@/lib/engineUsageTracker';
-import { useEffect, useState } from 'react';
-
-interface SkillNode {
-  id: string;
-  name: string;
-  pillar: MovementPillar;
-  level: number;
-  skillIndex: number;
-  description: string;
-  unlocked: boolean;
-  icon: string;
-  benefits: string[];
-  requirements: {
-    pillarLevel: number;
-    description: string;
-  };
-  tags?: string[];
-  clinicalReason?: string;
-  source?: string;
-  disabled?: boolean;
-  disabledReason?: string;
-}
+import { PILLAR_NAMES, EXERCISE_XP_BY_LEVEL, type MovementPillar, type Exercise } from '@/types';
+import {
+  getExercisesSync,
+  isExercisesLoaded,
+  preloadExercises,
+  getLevelsForPillar,
+  getMusclesForExercises,
+} from '@/lib/exerciseService';
 
 const pillarColors: Record<MovementPillar, string> = {
-  push: '#ef4444', // Red
-  pull: '#eab308', // Yellow
-  legs: '#3b82f6', // Blue
-  core: '#8b5cf6', // Indigo/Purple
-  endurance: '#ec4899', // Pink
-  mobility: '#22c55e', // Green
+  push: '#ef4444',
+  pull: '#eab308',
+  legs: '#3b82f6',
+  core: '#8b5cf6',
+  endurance: '#ec4899',
+  mobility: '#22c55e',
 };
 
-const dedupeSkillDefinitionsById = (skills: SkillDefinition[]) => {
-  const seen = new Set<string>();
-  return skills.filter((skill) => {
-    if (!skill?.id || seen.has(skill.id)) return false;
-    seen.add(skill.id);
-    return true;
-  });
+const pillarIcons: Record<MovementPillar, typeof Flame> = {
+  push: Flame,
+  pull: Zap,
+  legs: Dumbbell,
+  core: Shield,
+  endurance: Heart,
+  mobility: Move,
 };
 
-interface SkillCardProps {
-  skill: SkillNode;
+const levelLabels: Record<number, string> = {
+  0: 'Iniciante',
+  1: 'Básico',
+  2: 'Intermediário',
+  3: 'Avançado',
+  4: 'Expert',
+  5: 'Elite',
+};
+
+// â”€â”€â”€ Exercise Detail Popup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+interface ExercisePopupProps {
+  exercise: Exercise;
+  onClose: () => void;
 }
 
-function SkillCard({ skill }: SkillCardProps) {
-  const color = pillarColors[skill.pillar];
-  
+function ExercisePopup({ exercise, onClose }: ExercisePopupProps) {
+  const color = pillarColors[exercise.pillar];
+
   return (
     <motion.div
-      whileHover={{ scale: skill.unlocked && !skill.disabled ? 1.02 : 1 }}
-      className={`
-        group relative p-4 rounded-lg border transition-all duration-300
-        ${skill.disabled
-          ? 'bg-red-950/20 border-red-500/40 opacity-80'
-          : skill.unlocked 
-          ? 'bg-shadow-700/50 border-white/10 hover:border-neon-blue/30 cursor-pointer'
-          : 'bg-shadow-800/50 border-white/5 opacity-50'
-        }
-      `}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
     >
-      {!skill.unlocked && (
-        <div className="absolute top-2 right-2 flex gap-2">
-            <Lock className="w-4 h-4 text-white/30" />
-        </div>
-      )}
-
-       {skill.unlocked && !skill.disabled && (
-        <div className="absolute top-2 right-2 flex gap-2">
-            <Star className="w-4 h-4 text-yellow-400" />
-        </div>
-      )}
-
-       {/* Help Tooltip */}
-       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="relative group/tooltip">
-                <HelpCircle className="w-4 h-4 text-white/20 hover:text-white/60" />
-                <div className="absolute right-0 top-6 w-48 bg-black/90 border border-white/10 p-2 rounded text-[10px] text-white/70 z-50 pointer-events-none opacity-0 group-hover/tooltip:opacity-100 transition-opacity">
-                    {skill.disabled
-                        ? `Skill desativada: ${skill.disabledReason || 'restricao clinica ativa'}`
-                        : skill.unlocked 
-                        ? `Skill desbloqueada! ${skill.benefits.join(', ')}`
-                        : `Requer nível ${skill.requirements.pillarLevel} em ${PILLAR_NAMES[skill.pillar]}`
-                    }
-                </div>
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <GlassPanel className="p-6 border-white/20">
+          {/* Header */}
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex-1">
+              <h2 className="font-display text-xl text-white mb-1">{exercise.name}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className="px-2 py-0.5 text-xs rounded border"
+                  style={{ borderColor: `${color}60`, color, background: `${color}15` }}
+                >
+                  {PILLAR_NAMES[exercise.pillar]}
+                </span>
+                <span className="px-2 py-0.5 text-xs rounded border border-white/20 text-white/60">
+                  {exercise.muscle}
+                </span>
+                <span className="px-2 py-0.5 text-xs rounded border border-neon-blue/30 text-neon-blue">
+                  Nível {exercise.level} • {EXERCISE_XP_BY_LEVEL[exercise.level] ?? 10} XP
+                </span>
+              </div>
             </div>
-      </div>
-      
-      <div className="flex items-start gap-3">
-        <div 
-          className="w-10 h-10 rounded-lg flex items-center justify-center"
-          style={{ background: `${color}20`, border: `1px solid ${color}40` }}
-        >
-          <div className="w-6 h-6 rounded" style={{ background: color }} />
-        </div>
-        
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-1 pr-6">
-            <span className="font-display font-semibold text-white">{skill.name}</span>
-            <span className="text-xs font-mono text-neon-blue">
-                Nível {skill.level}.{skill.skillIndex}
-            </span>
-          </div>
-          
-          <div className="text-xs mb-2">
-             <span className="text-white/40">{skill.description}</span>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-colors"
+            >
+              <X className="w-5 h-5 text-white/60" />
+            </button>
           </div>
 
-          {skill.unlocked && !skill.disabled && (
-            <div className="text-xs text-green-400 mb-2">
-              ✓ {skill.benefits.join(' • ')}
+          {/* GIF Preview */}
+          {exercise.previewSrc && (
+            <div className="mb-4 rounded-lg overflow-hidden border border-white/10 bg-black/40">
+              <img
+                src={exercise.previewSrc}
+                alt={exercise.name}
+                className="w-full h-auto max-h-64 object-contain"
+                loading="lazy"
+              />
             </div>
           )}
 
-          {skill.disabled ? (
-            <div className="text-xs text-red-300 mb-2">
-              ⚠ Desativada por segurança: {skill.disabledReason || 'restrição clínica ativa'}
-            </div>
-          ) : null}
-
-          {Array.isArray(skill.tags) && skill.tags.length > 0 ? (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {skill.tags.map((tag) => (
+          {/* Equipment */}
+          <div className="mb-4">
+            <div className="text-white/40 text-xs uppercase tracking-wider mb-1.5">Equipamento</div>
+            <div className="flex flex-wrap gap-1.5">
+              {exercise.equipment.map((eq) => (
                 <span
-                  key={`${skill.id}-${tag}`}
-                  className="px-2 py-0.5 text-[10px] rounded border border-amber-400/30 bg-amber-400/10 text-amber-200"
+                  key={eq}
+                  className="px-2 py-0.5 text-xs rounded border border-white/15 bg-shadow-700/50 text-white/70"
                 >
-                  {tag}
+                  {eq === 'None' ? 'Peso Corporal' : eq}
                 </span>
               ))}
             </div>
-          ) : null}
-
-          {skill.clinicalReason ? (
-            <div className="text-[11px] text-amber-100/80 mb-2">{skill.clinicalReason}</div>
-          ) : null}
-
-          {skill.source === 'adaptive-ai' ? (
-            <div className="text-[10px] text-neon-blue/80 uppercase tracking-wider mb-2">Adaptive Skill</div>
-          ) : null}
-          
-          {/* Progress bar */}
-          <div className="h-1.5 bg-black/30 rounded-full overflow-hidden border border-white/10">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: skill.unlocked && !skill.disabled ? '100%' : '0%' }}
-              transition={{ duration: 0.5 }}
-              className="h-full rounded-full"
-              style={{ background: skill.disabled ? '#ef4444' : color }}
-            />
           </div>
+
+          {/* How To */}
+          <div className="mb-4">
+            <div className="text-white/40 text-xs uppercase tracking-wider mb-1.5">Como Executar</div>
+            <div className="bg-shadow-800/60 border border-neon-blue/15 rounded-lg p-4">
+              <p className="text-white/80 text-sm leading-relaxed">{exercise.howTo}</p>
+            </div>
+          </div>
+
+          {/* Video Link */}
+          {exercise.videoLink && (
+            <a
+              href={exercise.videoLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Ver vídeo tutorial
+            </a>
+          )}
+        </GlassPanel>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// â”€â”€â”€ Exercise Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+interface ExerciseCardProps {
+  exercise: Exercise;
+  onClick: () => void;
+}
+
+function ExerciseCard({ exercise, onClick }: ExerciseCardProps) {
+  const color = pillarColors[exercise.pillar];
+
+  return (
+    <motion.div
+      whileHover={{ scale: 1.01 }}
+      whileTap={{ scale: 0.99 }}
+      onClick={onClick}
+      className="cursor-pointer p-3.5 rounded-lg border border-white/10 bg-shadow-700/40 hover:border-neon-blue/30 transition-all duration-200 group"
+    >
+      <div className="flex items-center gap-3">
+        {/* Level indicator */}
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: `${color}15`, border: `1px solid ${color}30` }}
+        >
+          <span className="font-mono text-sm font-bold" style={{ color }}>
+            L{exercise.level}
+          </span>
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="font-display text-sm text-white truncate">{exercise.name}</div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-[11px] text-white/40">{exercise.muscle}</span>
+            <span className="text-[10px] text-white/20">•</span>
+            <span className="text-[11px] text-white/40">
+              {exercise.equipment.map((e) => (e === 'None' ? 'BW' : e)).join(', ')}
+            </span>
+          </div>
+        </div>
+
+        {/* XP + Arrow */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs font-mono text-neon-blue">
+            {EXERCISE_XP_BY_LEVEL[exercise.level] ?? 10} XP
+          </span>
+          <ChevronRight className="w-4 h-4 text-white/20 group-hover:text-neon-blue/60 transition-colors" />
         </div>
       </div>
     </motion.div>
   );
 }
 
+// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 export function SkillsPage() {
-  const user = useAppStore((state) => state.user);
   const pillarLevels = useAppStore((state) => state.pillarLevels);
-  const availableEquipment = useAppStore((state) => state.availableEquipment);
-  const userSkills = user?.userSkills || {};
-  const customSkillsByPillar = user?.customSkills || {
-    push: [],
-    pull: [],
-    core: [],
-    legs: [],
-    mobility: [],
-    endurance: [],
-  };
-  const skillConstraints = user?.skillConstraints || {};
-  const hasGymAccess = user?.hasGymAccess;
+  const [loaded, setLoaded] = useState(isExercisesLoaded());
+  const [selectedPillar, setSelectedPillar] = useState<MovementPillar>('push');
+  const [selectedLevel, setSelectedLevel] = useState<number>(0);
+  const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
 
   const pillars: MovementPillar[] = ['push', 'pull', 'core', 'legs', 'mobility', 'endurance'];
-  const [selectedPillar, setSelectedPillar] = useState<MovementPillar>('push');
-  const currentPillarLevel = pillarLevels[selectedPillar]?.level || 0;
-  const [selectedLevel, setSelectedLevel] = useState<number>(currentPillarLevel);
-  const [validationResults, setValidationResults] = useState<Record<string, any>>({});
-  const [isValidating, setIsValidating] = useState(false);
+
+  // User's max accessible exercise level for current pillar (pillarLevel + 1, capped at 5)
+  const userPillarLevel = pillarLevels?.[selectedPillar]?.level ?? 0;
+  const maxAccessibleLevel = Math.min(5, userPillarLevel + 1);
 
   useEffect(() => {
-    setSelectedLevel(currentPillarLevel);
-  }, [selectedPillar, currentPillarLevel]);
-
-  // Generate skills for selected pillar and level
-  const skillsForCurrentView = SKILL_DEFINITIONS[selectedPillar]?.[selectedLevel] || [];
-  const customSkillsForCurrentView = (customSkillsByPillar[selectedPillar] || []).filter(
-    (skillDef) => Number(skillDef.level) === selectedLevel
-  );
-  const mergedSkillsForCurrentView = dedupeSkillDefinitionsById([
-    ...skillsForCurrentView,
-    ...customSkillsForCurrentView,
-  ]);
-  
-  const skillNodes: SkillNode[] = mergedSkillsForCurrentView.map(skillDef => ({
-    id: skillDef.id,
-    name: skillDef.name,
-    pillar: skillDef.pillar,
-    level: skillDef.level,
-    skillIndex: skillDef.skillIndex,
-    description: skillDef.description,
-    unlocked: userSkills[skillDef.id]?.unlocked || false,
-    icon: skillDef.icon,
-    benefits: skillDef.benefits,
-    requirements: skillDef.requirements,
-    tags: skillDef.tags,
-    clinicalReason: skillDef.clinicalReason,
-    source: skillDef.source,
-    disabled: skillConstraints[skillDef.id]?.status === 'disabled',
-    disabledReason: skillConstraints[skillDef.id]?.reason,
-  }));
-  const gymSkillPool = getGymSkillDefinitionsByPillar({
-    hasGymAccess,
-    availableEquipment,
-    pillarLevels,
-  });
-  const gymSkillsForCurrentPillar = gymSkillPool[selectedPillar] || [];
-  const canAttemptLevelUp = currentPillarLevel < 4 && LEVEL_UP_CHALLENGES[selectedPillar].some(challenge => 
-    challenge.fromLevel === currentPillarLevel
-  );
-
-  const validateLevelUpChallenge = async (challengeId: string) => {
-    setIsValidating(true);
-    try {
-      // Call AI validation
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [{
-            role: 'user',
-            text: `Validate if user can attempt level up challenge for pillar ${selectedPillar}. Current level: ${currentPillarLevel}. Check user skills and requirements.`
-          }],
-          tools: [{
-            name: 'validate_level_up',
-            args: { pillar: selectedPillar }
-          }]
-        })
-      });
-
-      const data = await response.json();
-      recordApiCall();
-      const validation = JSON.parse(data.response || '{}');
-      
-      setValidationResults(prev => ({
-        ...prev,
-        [challengeId]: validation
-      }));
-    } catch (error) {
-      console.error('Validation failed:', error);
-    } finally {
-      setIsValidating(false);
+    if (!loaded) {
+      preloadExercises().then(() => setLoaded(true));
     }
-  };
+  }, [loaded]);
+
+  const allExercises = useMemo(() => getExercisesSync(), [loaded]);
+
+  const pillarExercises = useMemo(
+    () => allExercises.filter((ex) => ex.pillar === selectedPillar),
+    [allExercises, selectedPillar]
+  );
+
+  // Only exercises the user can access (up to maxAccessibleLevel)
+  const accessibleExercises = useMemo(
+    () => pillarExercises.filter((ex) => ex.level <= maxAccessibleLevel),
+    [pillarExercises, maxAccessibleLevel]
+  );
+
+  const availableLevels = useMemo(
+    () => getLevelsForPillar(allExercises, selectedPillar),
+    [allExercises, selectedPillar]
+  );
+
+  // Reset level/muscle when switching pillar — default to user's pillar level
+  useEffect(() => {
+    const pLvl = pillarLevels?.[selectedPillar]?.level ?? 0;
+    setSelectedLevel(pLvl);
+    setSelectedMuscle(null);
+    setSearchQuery('');
+  }, [selectedPillar, pillarLevels]);
+
+  const filteredByLevel = useMemo(
+    () => accessibleExercises.filter((ex) => ex.level === selectedLevel),
+    [accessibleExercises, selectedLevel]
+  );
+
+  const availableMuscles = useMemo(() => getMusclesForExercises(filteredByLevel), [filteredByLevel]);
+
+  const filteredExercises = useMemo(() => {
+    let result = filteredByLevel;
+    if (selectedMuscle) {
+      result = result.filter((ex) => ex.muscle === selectedMuscle);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (ex) =>
+          ex.name.toLowerCase().includes(q) ||
+          ex.muscle.toLowerCase().includes(q) ||
+          ex.equipment.some((eq) => eq.toLowerCase().includes(q))
+      );
+    }
+    return result;
+  }, [filteredByLevel, selectedMuscle, searchQuery]);
+
+  // Reset muscle when it's no longer available after level change
+  useEffect(() => {
+    if (selectedMuscle && !availableMuscles.includes(selectedMuscle)) {
+      setSelectedMuscle(null);
+    }
+  }, [availableMuscles, selectedMuscle]);
+
+  if (!loaded) {
+    return (
+      <div className="pt-20 md:pt-24 pb-24 md:pb-8 px-3 sm:px-4 max-w-7xl mx-auto flex items-center justify-center">
+        <div className="w-10 h-10 border-2 border-neon-blue/20 border-t-neon-blue rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="pt-24 pb-8 px-4 max-w-7xl mx-auto">
+    <div className="pt-20 md:pt-24 pb-24 md:pb-8 px-3 sm:px-4 max-w-7xl mx-auto">
       <motion.h1
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="font-display text-3xl font-bold text-white mb-2"
+        className="font-display text-2xl sm:text-3xl font-bold text-white mb-1"
       >
-        Skill Tree
+        Exercise Catalog
       </motion.h1>
-      <p className="text-white/50 mb-8">
-        Domine habilidades específicas em cada pilar de movimento
+      <p className="text-white/50 text-sm mb-6">
+        {accessibleExercises.length} exercícios disponíveis • Toque para ver detalhes e GIF
       </p>
 
-      {/* Pillar Selection */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+      {/* Pillar Tabs */}
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">
         {pillars.map((pillar) => {
-            const Icon = {
-                push: Flame,
-                pull: Zap,
-                legs: Dumbbell,
-                core: Shield,
-                endurance: Heart,
-                mobility: Move
-            }[pillar];
-            const staticSkillDefsForPillar = Object.values(SKILL_DEFINITIONS[pillar] || {}).flatMap(
-              (skills) => skills || []
-            );
-            const customSkillDefsForPillar = customSkillsByPillar[pillar] || [];
-            const allSkillDefsForPillar = dedupeSkillDefinitionsById([
-              ...staticSkillDefsForPillar,
-              ...customSkillDefsForPillar,
-            ]);
-            const unlockedSkillsForPillar = allSkillDefsForPillar.filter(
-              (skillDef) =>
-                userSkills[skillDef.id]?.unlocked && skillConstraints[skillDef.id]?.status !== 'disabled'
-            ).length;
-            const disabledSkillsForPillar = allSkillDefsForPillar.filter(
-              (skillDef) => skillConstraints[skillDef.id]?.status === 'disabled'
-            ).length;
-            
+          const Icon = pillarIcons[pillar];
+          const pLevel = pillarLevels?.[pillar]?.level ?? 0;
+          const maxLvl = Math.min(5, pLevel + 1);
+          const accessibleCount = allExercises.filter((ex) => ex.pillar === pillar && ex.level <= maxLvl).length;
+          const isActive = selectedPillar === pillar;
           return (
-          <motion.div
-            key={pillar}
-            whileHover={{ scale: 1.05 }}
-            onClick={() => setSelectedPillar(pillar)}
-            className={`cursor-pointer transition-all duration-300 ${
-              selectedPillar === pillar ? 'ring-2 ring-neon-blue' : ''
-            }`}
-          >
-            <GlassPanel className="p-4">
-              <div className="text-center">
-                <div 
-                  className="w-8 h-8 rounded-full mx-auto mb-2 flex items-center justify-center"
-                  style={{ background: `${pillarColors[pillar]}20` }}
-                >
-                  <Icon className="w-4 h-4" style={{ color: pillarColors[pillar] }} />
-                </div>
-                <div className="font-display text-xs uppercase tracking-wider text-white/60 mb-1">
-                  {PILLAR_NAMES[pillar]}
-                </div>
-                <div className="font-mono text-sm" style={{ color: pillarColors[pillar] }}>
-                  Nível {pillarLevels[pillar]?.level || 0}
-                </div>
-                <div className="text-xs text-white/40 mt-1">
-                  {pillarLevels[pillar]?.xp || 0}/{pillarLevels[pillar]?.xpToNext || 100} XP
-                </div>
-                <div className="text-[10px] text-white/35 mt-1">
-                  {unlockedSkillsForPillar}/{allSkillDefsForPillar.length} skills
-                </div>
-                {disabledSkillsForPillar > 0 ? (
-                  <div className="text-[10px] text-red-300/80 mt-1">{disabledSkillsForPillar} desativadas</div>
-                ) : null}
+            <motion.button
+              key={pillar}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setSelectedPillar(pillar)}
+              className={`relative p-3 rounded-lg border text-center transition-all duration-200 ${
+                isActive
+                  ? 'border-neon-blue bg-neon-blue/10'
+                  : 'border-white/10 bg-shadow-700/30 hover:border-white/20'
+              }`}
+            >
+              <Icon
+                className="w-5 h-5 mx-auto mb-1"
+                style={{ color: isActive ? pillarColors[pillar] : 'rgba(255,255,255,0.4)' }}
+              />
+              <div className={`font-display text-[11px] uppercase tracking-wider ${isActive ? 'text-white' : 'text-white/50'}`}>
+                {pillar}
               </div>
-            </GlassPanel>
-          </motion.div>
+              <div className="text-[10px] text-white/30 mt-0.5">{accessibleCount} ex</div>
+              <div className="text-[9px] text-neon-blue/50 mt-0.5">Lv {pLevel}</div>
+            </motion.button>
           );
         })}
       </div>
 
-      {/* Level Selection */}
-      <div className="flex gap-2 mb-6 overflow-x-auto">
-        {[0, 1, 2, 3, 4].map((level) => (
-          <motion.button
-            key={level}
-            whileHover={{ scale: 1.05 }}
-            onClick={() => setSelectedLevel(level)}
-            className={`px-4 py-2 rounded-lg font-mono text-sm transition-all duration-300 whitespace-nowrap ${
-              selectedLevel === level
-                ? 'bg-neon-blue text-black'
-                : level <= currentPillarLevel
-                ? 'bg-shadow-700 text-white border border-white/10'
-                : 'bg-shadow-800 text-white/30 border border-white/5'
-            }`}
-            disabled={level > currentPillarLevel}
-          >
-            Nível {level}
-            {level === currentPillarLevel && ' (Atual)'}
-            {level > currentPillarLevel && ' (Bloqueado)'}
-          </motion.button>
-        ))}
+      {/* Current pillar level info */}
+      <div className="flex items-center gap-2 mb-4 px-1">
+        <span className="text-xs text-white/40">Seu nível em <span className="text-white/70 font-display uppercase">{selectedPillar}</span>:</span>
+        <span className="text-xs font-mono font-bold text-neon-blue">Lv {userPillarLevel}</span>
+        <span className="text-xs text-white/30">•</span>
+        <span className="text-xs text-white/40">Exercícios até <span className="font-mono text-white/60">L{maxAccessibleLevel}</span></span>
       </div>
 
-      {hasGymAccess && (
-        <GlassPanel className="p-4 mb-6 border-neon-blue/20">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <Dumbbell className="w-4 h-4 text-neon-blue" />
-              <h3 className="font-display text-sm uppercase tracking-wider text-white">
-                Gym Skills Available
-              </h3>
-            </div>
-            <span className="text-xs text-white/50">
-              {availableEquipment.length > 0
-                ? `Equipamentos: ${availableEquipment.join(', ')}`
-                : 'Sem filtro de equipamento'}
-            </span>
+      {/* Level Tabs */}
+      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+        {availableLevels.map((level) => {
+          const isLocked = level > maxAccessibleLevel;
+          const count = pillarExercises.filter((ex) => ex.level === level).length;
+          const isActive = selectedLevel === level;
+          const color = pillarColors[selectedPillar];
+          return (
+            <button
+              key={level}
+              onClick={() => !isLocked && setSelectedLevel(level)}
+              disabled={isLocked}
+              className={`relative flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs whitespace-nowrap transition-all duration-200 ${
+                isLocked
+                  ? 'bg-shadow-800/60 text-white/15 border border-white/5 cursor-not-allowed'
+                  : isActive
+                  ? 'text-white font-semibold border shadow-lg'
+                  : 'bg-shadow-700/40 text-white/50 border border-white/10 hover:border-white/25 hover:text-white/70'
+              }`}
+              style={isActive && !isLocked ? {
+                borderColor: `${color}60`,
+                background: `${color}15`,
+                boxShadow: `0 0 12px ${color}20`,
+              } : undefined}
+            >
+              {isLocked ? (
+                <Lock className="w-3 h-3 text-white/20" />
+              ) : (
+                <span
+                  className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold"
+                  style={{
+                    background: isActive ? `${color}30` : 'rgba(255,255,255,0.08)',
+                    color: isActive ? color : 'rgba(255,255,255,0.4)',
+                  }}
+                >
+                  {level}
+                </span>
+              )}
+              <span>{levelLabels[level] || `Nível ${level}`}</span>
+              <span className={`text-[10px] ${isActive ? 'text-white/60' : 'text-white/25'}`}>({count})</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Muscle Filter Chips */}
+      {availableMuscles.length > 1 && (
+        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+          <div className="flex items-center gap-1 mr-1 flex-shrink-0">
+            <Filter className="w-3.5 h-3.5 text-white/30" />
           </div>
-          {gymSkillsForCurrentPillar.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {gymSkillsForCurrentPillar.map((skill) => (
-                <div key={skill.id} className="p-2 rounded border border-white/10 bg-shadow-800/40">
-                  <div className="text-white text-sm font-display">{skill.name}</div>
-                  <div className="text-white/50 text-xs">{skill.description}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-white/50 text-sm">
-              Nenhuma skill de academia encontrada para este pilar com os equipamentos atuais.
-            </p>
-          )}
-        </GlassPanel>
+          {availableMuscles.map((muscle) => {
+            const count = filteredByLevel.filter((ex) => ex.muscle === muscle).length;
+            const isActive = selectedMuscle === muscle;
+            return (
+              <button
+                key={muscle}
+                onClick={() => setSelectedMuscle(isActive ? null : muscle)}
+                className={`px-2.5 py-1 rounded-full text-[11px] whitespace-nowrap transition-all ${
+                  isActive
+                    ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/40'
+                    : 'bg-shadow-700/40 text-white/50 border border-white/10 hover:border-white/20'
+                }`}
+              >
+                {muscle} ({count})
+              </button>
+            );
+          })}
+        </div>
       )}
 
-      {/* Level Up Challenge */}
-      {canAttemptLevelUp && selectedLevel === currentPillarLevel && (
-        <GlassPanel className="p-6 mb-6 border-neon-blue/30">
-          <div className="flex items-center gap-4 mb-4">
-            <Target className="w-6 h-6 text-neon-blue" />
-            <div>
-              <h3 className="font-display text-lg text-white">Desafio de Subida de Nível</h3>
-              <p className="text-white/60 text-sm">
-                Complete este desafio para alcançar o Nível {currentPillarLevel + 1} em {PILLAR_NAMES[selectedPillar]}
-              </p>
-            </div>
-          </div>
-          
-          {LEVEL_UP_CHALLENGES[selectedPillar]
-            .filter(challenge => challenge.fromLevel === currentPillarLevel)
-            .map(challenge => (
-              <div key={challenge.id} className="space-y-3">
-                <div className="bg-shadow-800/50 p-4 rounded-lg">
-                  <h4 className="font-display text-white mb-2">{challenge.challenge.name}</h4>
-                  <p className="text-white/60 text-sm mb-3">{challenge.challenge.description}</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <h5 className="text-neon-blue font-semibold mb-2">Requisitos:</h5>
-                      <ul className="text-sm text-white/70 space-y-1">
-                        {challenge.challenge.requirements.map((req, idx) => (
-                          <li key={idx}>• {req}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    
-                    <div>
-                      <h5 className="text-green-400 font-semibold mb-2">Recompensas:</h5>
-                      <ul className="text-sm text-white/70 space-y-1">
-                        <li>• +{challenge.rewards.xpBonus} XP bônus</li>
-                        <li>• {challenge.rewards.skillUnlocks.length} novas skills</li>
-                      </ul>
-                      
-                      <h5 className="text-red-400 font-semibold mb-2 mt-3">Riscos:</h5>
-                      <ul className="text-sm text-white/70 space-y-1">
-                        <li>• -{challenge.risk.xpPenalty} XP se falhar</li>
-                        <li>• {Math.round(challenge.risk.debuffChance * 100)}% chance de debuff</li>
-                      </ul>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-white/40">
-                      Tempo limite: {challenge.challenge.timeLimit}min
-                    </span>
-                    <div className="flex gap-2">
-                      {!validationResults[challenge.id] && (
-                        <button 
-                          onClick={() => validateLevelUpChallenge(challenge.id)}
-                          disabled={isValidating}
-                          className="px-3 py-2 bg-yellow-600 text-black font-semibold rounded hover:bg-yellow-500 transition-colors disabled:opacity-50 text-sm"
-                        >
-                          {isValidating ? 'Validando...' : 'Validar Pré-requisitos'}
-                        </button>
-                      )}
-                      {validationResults[challenge.id] && (
-                        <button 
-                          disabled={!validationResults[challenge.id].validation}
-                          className={`px-4 py-2 font-semibold rounded transition-colors text-sm ${
-                            validationResults[challenge.id].validation 
-                              ? 'bg-neon-blue text-black hover:bg-neon-blue/80' 
-                              : 'bg-red-600 text-white cursor-not-allowed'
-                          }`}
-                        >
-                          {validationResults[challenge.id].validation ? 'Iniciar Desafio' : 'Pré-requisitos Não Atendidos'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {validationResults[challenge.id] && (
-                    <div className={`mt-3 p-2 rounded text-xs ${
-                      validationResults[challenge.id].validation 
-                        ? 'bg-green-900/50 text-green-300' 
-                        : 'bg-red-900/50 text-red-300'
-                    }`}>
-                      {validationResults[challenge.id].validation 
-                        ? `✅ Pronto para desafio! Skills desbloqueadas: ${validationResults[challenge.id].unlockedSkillsCount}/${validationResults[challenge.id].requiredSkillsCount}`
-                        : `❌ Requisitos não atendidos. Skills necessárias: ${validationResults[challenge.id].requiredSkillsCount}, desbloqueadas: ${validationResults[challenge.id].unlockedSkillsCount}`
-                      }
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-        </GlassPanel>
-      )}
+      {/* Search */}
+      <div className="relative mb-5">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+        <input
+          type="text"
+          placeholder="Buscar exercício, músculo ou equipamento..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-2.5 bg-shadow-700/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-neon-blue/40"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2"
+          >
+            <X className="w-4 h-4 text-white/30 hover:text-white/60" />
+          </button>
+        )}
+      </div>
 
-      {/* Skills Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {skillNodes.length > 0 ? (
-          skillNodes.map((skill) => (
-            <SkillCard key={skill.id} skill={skill} />
+      {/* Results Count */}
+      <div className="text-xs text-white/40 mb-3">
+        {filteredExercises.length} exercício{filteredExercises.length !== 1 ? 's' : ''}
+        {selectedMuscle && ` • ${selectedMuscle}`}
+        {searchQuery && ` • busca: "${searchQuery}"`}
+      </div>
+
+      {/* Exercise List */}
+      <div className="space-y-2">
+        {filteredExercises.length > 0 ? (
+          filteredExercises.map((exercise) => (
+            <ExerciseCard
+              key={exercise.id}
+              exercise={exercise}
+              onClick={() => setSelectedExercise(exercise)}
+            />
           ))
         ) : (
-          <div className="col-span-full text-center py-12">
-            <Lock className="w-16 h-16 mx-auto text-white/20 mb-4" />
-            <h3 className="font-display text-xl text-white/40 mb-2">Nenhuma Skill Disponível</h3>
-            <p className="text-white/60">
-              Este nível ainda não foi desbloqueado. Complete desafios para progredir!
-            </p>
+          <div className="text-center py-12">
+            <Dumbbell className="w-12 h-12 mx-auto text-white/15 mb-3" />
+            <p className="text-white/40 font-display">Nenhum exercício encontrado</p>
+            <p className="text-white/25 text-sm mt-1">Tente mudar os filtros ou busca</p>
           </div>
         )}
       </div>
+
+      {/* Exercise Detail Popup */}
+      <AnimatePresence>
+        {selectedExercise && (
+          <ExercisePopup
+            exercise={selectedExercise}
+            onClose={() => setSelectedExercise(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -4,17 +4,17 @@ import { motion } from 'framer-motion';
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, LayoutDashboard, Scroll, Dumbbell, TrendingUp, User } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { SystemChatPanel } from '@/components/ui';
 import { ApexsysLogo } from '@/components/ui/ApexsysLogo';
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/quests', label: 'Quests' },
-  { href: '/skills', label: 'Skills' },
-  { href: '/progress', label: 'Progress' },
-  { href: '/profile', label: 'Profile' },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/quests', label: 'Quests', icon: Scroll },
+  { href: '/skills', label: 'Skills', icon: Dumbbell },
+  { href: '/progress', label: 'Progress', icon: TrendingUp },
+  { href: '/profile', label: 'Profile', icon: User },
 ];
 
 export function Navigation() {
@@ -96,23 +96,26 @@ export function Navigation() {
         </div>
       </div>
 
-      {/* Mobile Nav */}
-      <div className="md:hidden relative flex items-center justify-around py-2 border-t border-white/[0.05] bg-shadow-900/50 backdrop-blur-md">
+      {/* Mobile Bottom Nav */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-white/[0.08] bg-shadow-900/95 backdrop-blur-xl">
         {navItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || 
+            (item.href !== '/dashboard' && pathname?.startsWith(item.href));
+          const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
               className={`
-                px-3 py-1.5 font-display text-xs uppercase tracking-wider rounded-lg transition-all
+                flex flex-col items-center gap-1 px-3 py-1.5 min-w-[3.5rem] rounded-lg transition-all
                 ${isActive 
-                  ? 'text-white bg-shadow-700/50 border border-white/10' 
-                  : 'text-white/50'
+                  ? 'text-neon-blue' 
+                  : 'text-white/40 active:text-white/70'
                 }
               `}
             >
-              {item.label}
+              <Icon className="w-5 h-5" />
+              <span className="font-display text-[10px] uppercase tracking-wider leading-none">{item.label}</span>
             </Link>
           );
         })}

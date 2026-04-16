@@ -39,7 +39,7 @@ import type {
   UserSkill,
 } from '@/types';
 import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
-import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog } from '@/lib/equipmentCatalog';
+import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog, EQUIPMENT_PT_BR } from '@/lib/equipmentCatalog';
 import { recordApiCall } from '@/lib/engineUsageTracker';
 
 interface AssessmentData {
@@ -91,6 +91,11 @@ const EQUIPMENT_CATEGORIES: EquipmentCategory[] = [
   'accessory',
   'other',
 ];
+
+/** Equipment options for the assessment selection grid */
+const EQUIPMENT_OPTIONS: { key: string; label: string }[] = Object.entries(EQUIPMENT_PT_BR)
+  .filter(([key]) => key !== 'Other' && key !== 'Wall' && key !== 'None')
+  .map(([key, label]) => ({ key, label }));
 
 const parseEquipmentCategory = (value: unknown): EquipmentCategory | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -513,6 +518,8 @@ export function HunterAssessment() {
   const [testFeedback, setTestFeedback] = useState('');
   const [bioInfo, setBioInfo] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [selectedEquipment, setSelectedEquipment] = useState<Set<string>>(new Set());
+  const [skipEquipmentSelection, setSkipEquipmentSelection] = useState(false);
   
   // API Key handling
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -647,7 +654,9 @@ export function HunterAssessment() {
       "${finalBio}"
 
       IMPORTANTE:
-      - Analise o texto acima em busca de lesoes, dores ou limitacoes. Se encontrar (ex: dor no ombro), gere debuffs.
+      - Analise o texto acima em busca de lesoes, dores ou limitacoes. Se encontrar (ex: dor no ombro, acromio tipo 2, tendinite), gere debuffs.
+      - O bioSummary deve incluir TODAS as recomendacoes clinicas, protocolos acordados com o usuario e observacoes relevantes da conversa.
+      - Se o usuario concordou com alguma etapa de reabilitacao ou fortalecimento, registre isso no bioSummary.
       - Gere equipmentCatalog normalizado com os equipamentos informados.
       - Categorias permitidas: free-weight, barbell, machine, cable, bodyweight, cardio, accessory e other.
       - Marque enabledForAI=true para equipamentos realmente utilizaveis.
@@ -915,13 +924,16 @@ export function HunterAssessment() {
               >
                 <div className="text-center mb-6">
                   <Dumbbell className="w-12 h-12 mx-auto text-neon-blue mb-2" />
-                  <h2 className="font-display text-xl text-white">ACESSO À ACADEMIA</h2>
-                  <p className="text-white/40 text-sm">Você tem acesso a equipamentos de academia?</p>
+                  <h2 className="font-display text-xl text-white">ACESSO A ACADEMIA</h2>
+                  <p className="text-white/40 text-sm">Voce tem acesso a equipamentos de academia?</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <motion.button
-                    onClick={() => setData({ ...data, hasGymAccess: true })}
+                    onClick={() => {
+                      setData({ ...data, hasGymAccess: true });
+                      setSkipEquipmentSelection(false);
+                    }}
                     className={`p-6 border-2 transition-all text-center ${
                       data.hasGymAccess === true
                         ? 'border-neon-blue bg-neon-blue/10'
@@ -938,7 +950,11 @@ export function HunterAssessment() {
                   </motion.button>
 
                   <motion.button
-                    onClick={() => setData({ ...data, hasGymAccess: false })}
+                    onClick={() => {
+                      setData({ ...data, hasGymAccess: false, equipmentNotes: '' });
+                      setSelectedEquipment(new Set());
+                      setSkipEquipmentSelection(false);
+                    }}
                     className={`p-6 border-2 transition-all text-center ${
                       data.hasGymAccess === false
                         ? 'border-neon-blue bg-neon-blue/10'
@@ -950,22 +966,78 @@ export function HunterAssessment() {
                     <User className="w-8 h-8 mx-auto mb-2 text-orange-400" />
                     <h3 className={`font-display text-lg ${
                       data.hasGymAccess === false ? 'text-neon-blue' : 'text-white'
-                    }`}>Não</h3>
+                    }`}>Nao</h3>
                     <p className="text-white/40 text-sm">Calistenia apenas</p>
                   </motion.button>
                 </div>
 
-                <div className="mt-2">
-                  <label className="block text-white/60 text-sm mb-2">
-                    Liste os equipamentos que voce realmente tem (separados por virgula)
-                  </label>
-                  <textarea
-                    value={data.equipmentNotes}
-                    onChange={(e) => setData({ ...data, equipmentNotes: e.target.value })}
-                    placeholder="Ex: halteres, barra, anilhas, banco, roldana, kettlebell"
-                    className="w-full min-h-24 px-4 py-3 bg-shadow-800 border border-white/10 text-white text-sm focus:border-neon-blue focus:outline-none transition-colors resize-y"
-                  />
-                </div>
+                {/* Equipment selection - only show when gym access is true */}
+                {data.hasGymAccess === true && !skipEquipmentSelection && (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-white/60 text-sm">
+                      Selecione os equipamentos que voce tem acesso:
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[280px] overflow-y-auto pr-1">
+                      {EQUIPMENT_OPTIONS.map(({ key, label }) => {
+                        const isSelected = selectedEquipment.has(key);
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              const next = new Set(selectedEquipment);
+                              if (isSelected) {
+                                next.delete(key);
+                              } else {
+                                next.add(key);
+                              }
+                              setSelectedEquipment(next);
+                              setData(prev => ({
+                                ...prev,
+                                equipmentNotes: Array.from(next).join(', '),
+                              }));
+                            }}
+                            className={`px-3 py-2.5 rounded-lg border text-sm text-left transition-all ${
+                              isSelected
+                                ? 'border-neon-blue bg-neon-blue/10 text-white'
+                                : 'border-white/10 bg-shadow-800 text-white/60 hover:border-white/20'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedEquipment.size > 0 && (
+                      <p className="text-neon-blue/60 text-xs">
+                        {selectedEquipment.size} equipamento{selectedEquipment.size !== 1 ? 's' : ''} selecionado{selectedEquipment.size !== 1 ? 's' : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Option to skip equipment selection */}
+                {data.hasGymAccess === true && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkipEquipmentSelection(!skipEquipmentSelection);
+                      if (!skipEquipmentSelection) {
+                        setSelectedEquipment(new Set());
+                        setData(prev => ({ ...prev, equipmentNotes: '' }));
+                      }
+                    }}
+                    className={`w-full mt-2 px-4 py-3 rounded-lg border text-sm transition-all text-center ${
+                      skipEquipmentSelection
+                        ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-300'
+                        : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                    }`}
+                  >
+                    {skipEquipmentSelection
+                      ? 'Vou selecionar os aparelhos depois no Perfil'
+                      : 'Prefiro selecionar os aparelhos depois'}
+                  </button>
+                )}
               </motion.div>
             )}
 
