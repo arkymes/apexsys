@@ -6,9 +6,9 @@ import { AlertCircle, CheckCircle2, Scroll, Crown, ArrowRight } from 'lucide-rea
 import { useAppStore } from '@/store/useAppStore';
 import type { Quest, MovementPillar, Exercise } from '@/types';
 import { EXERCISE_XP_BY_LEVEL } from '@/types';
-import { getExercisesForQuestSync, getExerciseByIdSync, isExercisesLoaded } from '@/lib/exerciseService';
+import { getExercisesForQuestSync, isExercisesLoaded } from '@/lib/exerciseService';
 import { sanitizeText } from '@/lib/textSanitizer';
-import { recordApiCall } from '@/lib/engineUsageTracker';
+import { recordApiCall, resolveTokenCount } from '@/lib/engineUsageTracker';
 
 const mapPillarToStat = (pillar?: string) => {
   switch (pillar) {
@@ -140,19 +140,6 @@ const generateProtocol = async (
         adjustment: entry.recommendedAdjustment,
       }));
 
-    // Build full exercise pool for prompt (all pillars — AI decides the split)
-    const exercisePoolForPrompt = effectivePillars.map((pillar) => ({
-      pillar,
-      count: exercisePoolByPillar[pillar].length,
-      exercises: exercisePoolByPillar[pillar].map((ex) => ({
-        id: ex.id,
-        name: ex.name,
-        muscle: ex.muscle,
-        level: ex.level,
-        equipment: ex.equipment,
-      })),
-    }));
-
     // Summarize stats for the AI
     const statsSummary = user.stats
       ? Object.entries(user.stats).map(([k, v]) => `${k}: ${v}`).join(', ')
@@ -197,24 +184,22 @@ PERFIL DO USUARIO:
 HISTORICO RECENTE (ultimos 10 dias):
 ${recentHistory.length > 0 ? JSON.stringify(recentHistory) : 'Nenhum treino recente.'}
 
-BANCO DE EXERCICIOS DISPONIVEL (use SOMENTE exercicios deste banco):
-${JSON.stringify(exercisePoolForPrompt)}
-
 INSTRUCOES:
 - Analise o perfil, status, historico recente e debuffs para decidir o foco de hoje.
 - Decida quantos exercicios sao adequados para ${Number(user.availableTime) || 45} min (considere tempo de descanso entre series).
 - Decida quantas series e repeticoes para cada exercicio com base no objetivo e tempo.
 - Escolha o split de pilares ideal considerando o que ja foi treinado recentemente.
-- Para cada exercicio, use o "id" exato do banco e preencha exerciseId.
+- Antes de definir cada exercicio, recupere via tool search_exercises no backend para obter exerciseIds validos.
+- Para cada exercicio, use o "id" exato recuperado e preencha exerciseId.
 - Monte como um treino real: compostos antes de isolados, ordem logica de grupamentos.
 - Inclua executionGuide com cues tecnicos em portugues para cada exercicio.
 - Retorne 1 weekly quest sobre consistencia semanal.
-- NAO invente exercicios. Use SOMENTE os IDs do banco fornecido.`,
+- NAO invente exercicios. Use SOMENTE IDs recuperados pela tool.`,
       }),
     });
 
     const data = await response.json();
-    recordApiCall();
+    recordApiCall(resolveTokenCount(data?.tokenUsage, data?.response));
     const wasRetried = !!data.retried;
     if (data.error) throw new Error(data.error);
 
@@ -235,7 +220,9 @@ INSTRUCOES:
         : effectivePillars[i % effectivePillars.length];
       const exercisePool = exercisePoolByPillar[pillar];
       // Direct ID lookup first (most reliable), then fuzzy name fallback
-      const idMatch = aiQuest.exerciseId ? getExerciseByIdSync(String(aiQuest.exerciseId)) : undefined;
+      const idMatch = aiQuest.exerciseId
+        ? exercisePool.find((ex) => ex.id === String(aiQuest.exerciseId))
+        : undefined;
       const normalizedAiName = normalizeText(sanitizeText(String(aiQuest.name || '')));
       const matchedExercise = idMatch || exercisePool.find((ex) =>
         normalizeText(ex.name) === normalizedAiName ||
@@ -264,9 +251,10 @@ INSTRUCOES:
         (matchedIsAllowed ? matchedExercise : undefined) ||
         availablePool[i % Math.max(1, availablePool.length)] ||
         pickExerciseForPillar(exercisePoolByPillar, pillar, i);
-      const selectedName = sanitizeText(
-        selectedExercise?.name || String(aiQuest.name || `${pillar.toUpperCase()} Training`)
-      );
+      if (!selectedExercise) {
+        throw new Error(`Nenhum exercício válido disponível para o pilar ${pillar}.`);
+      }
+      const selectedName = sanitizeText(selectedExercise.name);
       const selectedNameKey = normalizeText(selectedName);
       if (selectedNameKey) selectedNameSet.add(selectedNameKey);
 

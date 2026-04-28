@@ -5,7 +5,7 @@ import { Send, Sparkles, X, Loader2, Terminal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAppStore } from '@/store/useAppStore';
 import { createSystemChat } from '@/lib/systemChatService';
-import { recordApiCall } from '@/lib/engineUsageTracker';
+import { recordApiCall, resolveTokenCount } from '@/lib/engineUsageTracker';
 import { getExercisesForQuestSync, getExerciseByIdSync, isExercisesLoaded } from '@/lib/exerciseService';
 import { EXERCISE_XP_BY_LEVEL } from '@/types';
 import {
@@ -868,7 +868,7 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const result = await chatInstance.current.sendMessage(payload);
-        recordApiCall();
+        recordApiCall(resolveTokenCount((result as any)?.usageMetadata, result?.text));
         return result;
       } catch (err: any) {
         lastError = err;

@@ -63,6 +63,7 @@ interface AppState {
 
   // Training History
   trainingHistory: TrainingDay[];
+  dailyQuestDateKey?: string; // YYYY-MM-DD
   lastWeeklyPenaltyCheck?: string; // ISO week key e.g. "2026-W15"
 
   // Actions: access
@@ -131,6 +132,7 @@ interface AppState {
   recordTrainingDay: (day: TrainingDay) => void;
   setTrainingFrequency: (freq: number) => void;
   checkWeeklyPenalty: () => { penaltyApplied: boolean; xpLost: number; sessionsDone: number; sessionsGoal: number } | null;
+  runQuestMaintenance: () => { failedDailyCount: number; weeklyPenaltyApplied: boolean };
 
   // Reset
   resetApp: () => void;
@@ -197,6 +199,14 @@ const normalizeDateToDayKey = (value: Date | string | number) => {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
+};
+
+const toLocalDayKey = (value: Date | string | number = Date.now()) => {
+  const d = new Date(value);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
 const normalizeEquipmentList = (items: string[]) =>
@@ -543,7 +553,9 @@ export const useAppStore = create<AppState>()(
       equipment: initialEquipment,
       availableEquipment: [],
       trainingHistory: [],
+      dailyQuestDateKey: undefined,
       trainingLogs: [],
+      lastWeeklyPenaltyCheck: undefined,
 
       // Screen Navigation
       setScreen: (screen) => set({ currentScreen: screen }),
@@ -723,7 +735,7 @@ export const useAppStore = create<AppState>()(
           });
 
           const data = await response.json();
-          recordApiCall();
+          recordApiCall(Number(data?.tokenUsage?.totalTokenCount) || 0);
           
           let adjustment;
           try {
@@ -1019,7 +1031,8 @@ export const useAppStore = create<AppState>()(
       },
 
       // Quests
-      setQuests: (daily, weekly) => set({ dailyQuests: daily, weeklyQuests: weekly }),
+      setQuests: (daily, weekly) =>
+        set({ dailyQuests: daily, weeklyQuests: weekly, dailyQuestDateKey: toLocalDayKey() }),
 
       /** @deprecated Use ProtocolGenerator (AI-based) instead. Kept for interface compat. */
       generatePMFQuests: ({ priorityPillars = ['push', 'pull', 'core'], painAreas = [], hasGymAccess }) => {
@@ -1165,6 +1178,7 @@ export const useAppStore = create<AppState>()(
         set({
           dailyQuests: daily,
           weeklyQuests: weekly,
+          dailyQuestDateKey: toLocalDayKey(),
           availableEquipment,
           user: {
             ...user,
@@ -1573,6 +1587,42 @@ export const useAppStore = create<AppState>()(
         return { penaltyApplied: true, xpLost, sessionsDone, sessionsGoal };
       },
 
+      runQuestMaintenance: () => {
+        const { dailyQuestDateKey, dailyQuests, trainingHistory } = get();
+        const todayKey = toLocalDayKey();
+        let failedDailyCount = 0;
+        const latestTrainingDay = trainingHistory
+          .map((day) => new Date(day.date).getTime())
+          .filter(Number.isFinite)
+          .sort((a, b) => b - a)[0];
+        const inferredQuestDay =
+          dailyQuestDateKey || (latestTrainingDay ? toLocalDayKey(latestTrainingDay) : undefined);
+
+        if (inferredQuestDay && inferredQuestDay !== todayKey && dailyQuests.length > 0) {
+          set((state) => {
+            const newlyFailed = state.dailyQuests
+              .filter((quest) => quest.type === 'daily' && quest.status === 'pending')
+              .map((quest) => ({ ...quest, status: 'failed' as const }));
+            failedDailyCount = newlyFailed.length;
+            return {
+              dailyQuests: state.dailyQuests.map((quest) =>
+                quest.type === 'daily' && quest.status === 'pending'
+                  ? { ...quest, status: 'failed' as const }
+                  : quest
+              ),
+              dailyQuestDateKey: todayKey,
+              questHistory: [...(state.questHistory || []), ...newlyFailed],
+            };
+          });
+        }
+
+        const weeklyPenalty = get().checkWeeklyPenalty();
+        return {
+          failedDailyCount,
+          weeklyPenaltyApplied: Boolean(weeklyPenalty?.penaltyApplied),
+        };
+      },
+
       // Skill System
       unlockSkill: (skillId: string) => {
         const { user } = get();
@@ -1677,6 +1727,7 @@ export const useAppStore = create<AppState>()(
           equipment: initialEquipment,
           availableEquipment: [],
           trainingHistory: [],
+          dailyQuestDateKey: undefined,
           trainingLogs: [],
           hasGymAccess: null,
           lastCheckIn: undefined,
@@ -1698,6 +1749,7 @@ export const useAppStore = create<AppState>()(
         equipment: state.equipment,
         availableEquipment: state.availableEquipment,
         trainingHistory: state.trainingHistory,
+        dailyQuestDateKey: state.dailyQuestDateKey,
         trainingLogs: state.trainingLogs,
         particlesEnabled: state.particlesEnabled,
         soundEnabled: state.soundEnabled,
@@ -1708,8 +1760,8 @@ export const useAppStore = create<AppState>()(
         recoveryStatus: state.recoveryStatus,
         pillarLevels: state.pillarLevels,
         athleteTier: state.athleteTier,
+        lastWeeklyPenaltyCheck: state.lastWeeklyPenaltyCheck,
       }),
     }
   )
 );
-

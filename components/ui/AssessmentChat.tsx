@@ -5,7 +5,7 @@ import { Send, UploadCloud, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAppStore } from '@/store/useAppStore';
 import { GoogleGenAI } from "@google/genai";
-import { recordApiCall } from '@/lib/engineUsageTracker';
+import { recordApiCall, resolveTokenCount } from '@/lib/engineUsageTracker';
 
 interface ChatMessage {
   id: string;
@@ -75,7 +75,7 @@ export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
 
     try {
         const result = await chatInstance.current.sendMessage({ message: "Analise os dados coletados e faça a primeira pergunta relevante sobre o perfil do usuário." });
-        recordApiCall();
+        recordApiCall(resolveTokenCount((result as any)?.usageMetadata, result?.text));
         setMessages([{
             id: 'init',
             role: 'model',
@@ -98,8 +98,8 @@ export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
 
     try {
         const result = await chatInstance.current.sendMessage({ message: userText });
-        recordApiCall();
         const text = result.text || "";
+        recordApiCall(resolveTokenCount((result as any)?.usageMetadata, text));
         
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text }]);
         
