@@ -20,11 +20,17 @@ export default function Home() {
   const user = useAppStore((state) => state.user);
   const particlesEnabled = useAppStore((state) => state.particlesEnabled);
   const setScreen = useAppStore((state) => state.setScreen);
+  const runQuestMaintenance = useAppStore((state) => state.runQuestMaintenance);
 
   useEffect(() => {
     setMounted(true);
     preloadExercises();
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    runQuestMaintenance();
+  }, [mounted, runQuestMaintenance]);
 
   useEffect(() => {
     if (!mounted) return;

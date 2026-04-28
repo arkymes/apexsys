@@ -1,6 +1,8 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, FunctionDeclaration, Tool, Type } from '@google/genai';
 import { sanitizeText } from '@/lib/textSanitizer';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 const setInitialProfileTool: FunctionDeclaration = {
   name: 'set_initial_profile',
@@ -136,6 +138,113 @@ const generateQuestsTool: FunctionDeclaration = {
   },
 };
 
+const searchExercisesTool: FunctionDeclaration = {
+  name: 'search_exercises',
+  description:
+    'Busca exercicios no banco do sistema via RAG/recuperacao por filtros. Use antes de gerar treino para obter IDs validos.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      pillar: { type: Type.STRING, enum: ['push', 'pull', 'legs', 'core', 'mobility', 'endurance'] },
+      goal: { type: Type.STRING, description: 'Objetivo da busca. Ex: pull sem sobrecarga no ombro.' },
+      include: { type: Type.ARRAY, items: { type: Type.STRING } },
+      exclude: { type: Type.ARRAY, items: { type: Type.STRING } },
+      limit: { type: Type.NUMBER },
+      maxLevel: { type: Type.NUMBER },
+    },
+  },
+};
+
+type ExerciseRecord = {
+  id: string;
+  name: string;
+  pillar: string;
+  muscle?: string;
+  level?: number;
+  equipment?: string[];
+  howTo?: string;
+};
+
+let exerciseCache: ExerciseRecord[] | null = null;
+
+const normalize = (value: unknown) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const loadExercises = async (): Promise<ExerciseRecord[]> => {
+  if (exerciseCache) return exerciseCache;
+  const filePath = path.join(process.cwd(), 'public', 'data', 'exercises.json');
+  const raw = await fs.readFile(filePath, 'utf-8');
+  exerciseCache = JSON.parse(raw) as ExerciseRecord[];
+  return exerciseCache;
+};
+
+const runExerciseRagSearch = async (
+  args: Record<string, unknown>,
+  context: Record<string, any>
+) => {
+  const exercises = await loadExercises();
+  const requestedPillar = normalize(args.pillar);
+  const pillar = ['push', 'pull', 'legs', 'core', 'mobility', 'endurance'].includes(requestedPillar)
+    ? requestedPillar
+    : '';
+  const goal = normalize(args.goal);
+  const includeTerms = Array.isArray(args.include) ? args.include.map((v) => normalize(v)).filter(Boolean) : [];
+  const excludeTerms = Array.isArray(args.exclude) ? args.exclude.map((v) => normalize(v)).filter(Boolean) : [];
+  const recentNames = new Set(
+    Array.isArray(context?.recentHistory)
+      ? context.recentHistory.map((h: any) => normalize(h?.name)).filter(Boolean)
+      : []
+  );
+  const enabledEquipment = new Set<string>(
+    Array.isArray(context?.availableEquipment) ? context.availableEquipment.map((e: any) => String(e)) : []
+  );
+  enabledEquipment.add('None');
+
+  const parsedLimit = Number(args.limit);
+  const limit = Number.isFinite(parsedLimit) ? Math.max(3, Math.min(40, Math.floor(parsedLimit))) : 16;
+  const parsedMaxLevel = Number(args.maxLevel);
+  const maxLevel = Number.isFinite(parsedMaxLevel) ? Math.max(0, Math.min(5, Math.floor(parsedMaxLevel))) : 5;
+
+  const scored = exercises
+    .filter((ex) => (pillar ? ex.pillar === pillar : true))
+    .filter((ex) => (typeof ex.level === 'number' ? ex.level <= maxLevel : true))
+    .filter((ex) => Array.isArray(ex.equipment) ? ex.equipment.every((eq) => enabledEquipment.has(eq)) : true)
+    .filter((ex) => !recentNames.has(normalize(ex.name)))
+    .map((ex) => {
+      const bag = `${normalize(ex.name)} ${normalize(ex.muscle)} ${normalize(ex.howTo)}`;
+      let score = 0;
+      for (const term of includeTerms) if (bag.includes(term)) score += 3;
+      for (const term of excludeTerms) if (bag.includes(term)) score -= 5;
+      if (goal && bag.includes(goal)) score += 2;
+      if (ex.level === 0) score += 0.3;
+      return { ex, score };
+    })
+    .filter((item) => item.score > -4)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((item) => ({
+      id: item.ex.id,
+      name: item.ex.name,
+      pillar: item.ex.pillar,
+      muscle: item.ex.muscle,
+      level: item.ex.level,
+      equipment: item.ex.equipment,
+      score: Number(item.score.toFixed(2)),
+    }));
+
+  return {
+    totalFound: scored.length,
+    query: { pillar, goal, includeTerms, excludeTerms, limit, maxLevel },
+    exercises: scored,
+  };
+};
+
 const evaluateTrainingTool: FunctionDeclaration = {
   name: 'evaluate_training',
   description: 'Avalia log de treino e define ajustes sistemicos.',
@@ -215,7 +324,8 @@ export async function POST(request: NextRequest) {
       - Para ${Number(context.availableTime) || 45} minutos, gere entre ${Math.max(4, Math.round((Number(context.availableTime) || 45) / 6))} e ${Math.max(6, Math.round((Number(context.availableTime) || 45) / 4))} exercicios diarios.
       - Monte um treino REAL e coeso: compostos antes de isolados, agrupados por pilar/musculo.
       - NAO distribua 1 exercicio por pilar. Foque em 2-3 pilares por sessao com multiplos exercicios cada.
-      - Use SOMENTE exerciseIds do banco fornecido no prompt. NAO invente exercicios.
+      - Antes de fechar o treino, use a tool search_exercises para recuperar IDs reais via RAG conforme objetivo e restricoes.
+      - Use SOMENTE exerciseIds recuperados via tool. NAO invente exercicios.
       - Considere debuffs/lesoes: ${context.debuffs?.length ? JSON.stringify(context.debuffs) : 'nenhum'}.
       - Bio/historico clinico: ${context.bio || 'nenhum'}.
       - Equipamentos disponiveis: ${context.availableEquipment?.length ? context.availableEquipment.join(', ') : 'apenas peso corporal'}.
@@ -232,8 +342,10 @@ export async function POST(request: NextRequest) {
       activeTools = [{ functionDeclarations: [evaluateTrainingTool] }];
       activeToolConfig = { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['evaluate_training'] } };
     } else if (intent === 'generate_quests') {
-      activeTools = [{ functionDeclarations: [generateQuestsTool] }];
-      activeToolConfig = { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['generate_quests'] } };
+      activeTools = [{ functionDeclarations: [generateQuestsTool, searchExercisesTool] }];
+      activeToolConfig = {
+        functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['search_exercises', 'generate_quests'] },
+      };
     }
 
     const models = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
@@ -245,21 +357,57 @@ export async function POST(request: NextRequest) {
       const maxRetries = 3;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-          result = await ai.models.generateContent({
-            model,
-            config: {
-              systemInstruction: { parts: [{ text: intent === 'generate_quests' ? generateQuestsInstruction : intent === 'assessment' ? assessmentInstruction : baseSystemInstruction }] },
-              tools: activeTools,
-              toolConfig: activeToolConfig,
-              temperature: 0.5,
+          const conversation: any[] = [
+            {
+              role: 'user',
+              parts: [{ text: `CONTEXTO:\n${JSON.stringify(context || {})}\n\nINPUT:\n${prompt}` }],
             },
-            contents: [
-              {
-                role: 'user',
-                parts: [{ text: `CONTEXTO:\n${JSON.stringify(context || {})}\n\nINPUT:\n${prompt}` }],
+          ];
+
+          let turns = 0;
+          while (turns < 8) {
+            turns += 1;
+            result = await ai.models.generateContent({
+              model,
+              config: {
+                systemInstruction: { parts: [{ text: intent === 'generate_quests' ? generateQuestsInstruction : intent === 'assessment' ? assessmentInstruction : baseSystemInstruction }] },
+                tools: activeTools,
+                toolConfig: activeToolConfig,
+                temperature: 0.5,
               },
-            ],
-          });
+              contents: conversation,
+            });
+
+            const functionCall = result?.candidates?.[0]?.content?.parts?.find((p) => p.functionCall)?.functionCall;
+            if (!functionCall) {
+              break;
+            }
+
+            if (intent === 'generate_quests' && functionCall.name === 'search_exercises') {
+              const ragResponse = await runExerciseRagSearch(
+                (functionCall.args as Record<string, unknown>) || {},
+                (context as Record<string, any>) || {}
+              );
+              conversation.push({
+                role: 'model',
+                parts: [{ functionCall }],
+              });
+              conversation.push({
+                role: 'user',
+                parts: [
+                  {
+                    functionResponse: {
+                      name: 'search_exercises',
+                      response: ragResponse,
+                    },
+                  },
+                ],
+              });
+              continue;
+            }
+
+            break;
+          }
 
           if (result?.candidates?.length) {
             break;
@@ -293,10 +441,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         response: JSON.stringify(sanitizePayloadStrings(call.functionCall.args)),
         retried,
+        tokenUsage: result.usageMetadata || null,
       });
     }
 
-    return NextResponse.json({ response: JSON.stringify({ error: 'System Core failed to execute directives.' }) });
+    return NextResponse.json({
+      response: JSON.stringify({ error: 'System Core failed to execute directives.' }),
+      tokenUsage: result.usageMetadata || null,
+    });
   } catch (error) {
     console.error('Gemini API error:', error);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });

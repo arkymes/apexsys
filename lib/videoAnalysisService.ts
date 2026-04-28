@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { UserProfile, Quest } from '@/types';
-import { recordApiCall } from '@/lib/engineUsageTracker';
+import { recordApiCall, resolveTokenCount } from '@/lib/engineUsageTracker';
 
 export interface VideoAnalysisRequest {
   apiKey: string;
@@ -131,7 +131,7 @@ Seja direto, tecnico e objetivo. Use linguagem de coaching esportivo.
         .filter(Boolean)
         .join('');
 
-      recordApiCall();
+      recordApiCall(resolveTokenCount((result as any)?.usageMetadata, text));
 
       if (text) {
         return { analysis: text };

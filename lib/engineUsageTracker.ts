@@ -21,6 +21,13 @@ interface PersistedUsage {
   totalTokens: number;
 }
 
+export interface TokenUsageLike {
+  totalTokenCount?: number;
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+}
+
 // Conservative free-tier defaults
 const DEFAULT_LIMITS = {
   rpm: 15,
@@ -55,9 +62,31 @@ const save = (usage: PersistedUsage) => {
 export function recordApiCall(tokensUsed: number = 0) {
   const usage = load();
   const now = Date.now();
-  usage.requests.push({ timestamp: now, tokens: tokensUsed });
-  usage.totalTokens += tokensUsed;
+  const safeTokens = Number.isFinite(tokensUsed) ? Math.max(0, Math.floor(tokensUsed)) : 0;
+  usage.requests.push({ timestamp: now, tokens: safeTokens });
+  usage.totalTokens += safeTokens;
   save(usage);
+}
+
+export function resolveTokenCount(
+  usage?: TokenUsageLike | null,
+  fallbackText?: string
+): number {
+  if (usage && typeof usage.totalTokenCount === 'number' && usage.totalTokenCount > 0) {
+    return Math.floor(usage.totalTokenCount);
+  }
+
+  const prompt = usage?.promptTokenCount || 0;
+  const candidates = usage?.candidatesTokenCount || 0;
+  const thoughts = usage?.thoughtsTokenCount || 0;
+  const byParts = prompt + candidates + thoughts;
+  if (byParts > 0) {
+    return Math.floor(byParts);
+  }
+
+  if (!fallbackText) return 0;
+  // Fallback conservative approximation (~4 chars/token)
+  return Math.max(1, Math.ceil(fallbackText.length / 4));
 }
 
 export interface EngineUsageSnapshot {

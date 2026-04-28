@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   User, 
@@ -54,7 +55,12 @@ export function Dashboard() {
   const dailyQuests = useAppStore((state) => state.dailyQuests);
   const weeklyQuests = useAppStore((state) => state.weeklyQuests);
   const completeQuest = useAppStore((state) => state.completeQuest);
+  const runQuestMaintenance = useAppStore((state) => state.runQuestMaintenance);
   const { sessionsDone, sessionsGoal } = useWeeklyProgress();
+
+  useEffect(() => {
+    runQuestMaintenance();
+  }, [runQuestMaintenance]);
 
   if (!user) return null;
 

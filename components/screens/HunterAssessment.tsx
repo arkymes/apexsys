@@ -673,7 +673,7 @@ export function HunterAssessment() {
       });
 
       const result = await response.json();
-      recordApiCall();
+      recordApiCall(Number(result?.tokenUsage?.totalTokenCount) || 0);
       const assessment = JSON.parse(result.response);
       const equipmentCatalog = buildAssessmentEquipmentCatalog(
         assessment?.equipmentCatalog,
@@ -1334,4 +1334,3 @@ export function HunterAssessment() {
     </div>
   );
 }
-

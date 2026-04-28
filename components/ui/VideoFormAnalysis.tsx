@@ -14,7 +14,8 @@ interface VideoFormAnalysisProps {
   onClose: () => void;
 }
 
-const MAX_VIDEO_SIZE_MB = 20;
+const MAX_VIDEO_SIZE_MB = 75;
+const TOKEN_WARNING_VIDEO_SIZE_MB = 25;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 
 export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
@@ -24,6 +25,7 @@ export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sizeWarning, setSizeWarning] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -41,6 +43,14 @@ export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
     }
 
     setError(null);
+    const fileSizeMb = file.size / (1024 * 1024);
+    if (fileSizeMb >= TOKEN_WARNING_VIDEO_SIZE_MB) {
+      setSizeWarning(
+        `Vídeo com ${fileSizeMb.toFixed(1)}MB: análise mais cara em tokens e resposta potencialmente mais lenta.`
+      );
+    } else {
+      setSizeWarning(null);
+    }
     setVideoFile(file);
     setAnalysis(null);
 
@@ -54,6 +64,7 @@ export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
     setVideoPreviewUrl(null);
     setAnalysis(null);
     setError(null);
+    setSizeWarning(null);
   }, [videoPreviewUrl]);
 
   const handleAnalyze = useCallback(async () => {
@@ -222,6 +233,15 @@ export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
                   {quest.sets}x{quest.reps} · {quest.difficulty}
                 </p>
               </div>
+
+              {sizeWarning && (
+                <div className="p-3 bg-amber-500/10 border border-amber-400/30 rounded-lg">
+                  <p className="text-amber-200 text-xs flex items-center gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    {sizeWarning}
+                  </p>
+                </div>
+              )}
 
               {/* User profile context indicator */}
               {user?.debuffs && user.debuffs.length > 0 && (
