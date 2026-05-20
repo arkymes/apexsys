@@ -1,9 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
 import type { UserProfile, Quest } from '@/types';
 import { recordApiCall, resolveTokenCount } from '@/lib/engineUsageTracker';
+import { DEFAULT_GEMINI_MODEL, normalizeGeminiModel } from '@/lib/geminiModels';
 
 export interface VideoAnalysisRequest {
   apiKey: string;
+  model?: string | null;
   videoBase64: string;
   mimeType: string;
   quest: Quest;
@@ -30,7 +32,7 @@ export interface VideoAnalysisResult {
 export async function analyzeExerciseVideo(
   request: VideoAnalysisRequest
 ): Promise<VideoAnalysisResult> {
-  const { apiKey, videoBase64, mimeType, quest, userProfile } = request;
+  const { apiKey, model, videoBase64, mimeType, quest, userProfile } = request;
 
   const ai = new GoogleGenAI({ apiKey });
 
@@ -105,7 +107,10 @@ FORMATO DE RESPOSTA (use markdown):
 Seja direto, tecnico e objetivo. Use linguagem de coaching esportivo.
   `.trim();
 
-  const models = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+  const preferredModel = normalizeGeminiModel(model || DEFAULT_GEMINI_MODEL);
+  const models = Array.from(
+    new Set([preferredModel, DEFAULT_GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-2.5-flash'])
+  );
   let lastError: unknown = null;
 
   for (const model of models) {

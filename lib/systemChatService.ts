@@ -1,5 +1,6 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content } from "@google/genai";
 import { ChatMessage } from '@/types';
+import { DEFAULT_GEMINI_MODEL } from '@/lib/geminiModels';
 
 // --- TOOL DEFINITIONS ---
 
@@ -272,7 +273,11 @@ const manageQuestsTool: FunctionDeclaration = {
   },
 };
 
-export const createSystemChat = (apiKey: string, history: ChatMessage[]) => {
+export const createSystemChat = (
+  apiKey: string,
+  history: ChatMessage[],
+  model: string = DEFAULT_GEMINI_MODEL
+) => {
   const ai = new GoogleGenAI({ apiKey });
 
   const apiHistory: Content[] = history
@@ -334,7 +339,7 @@ export const createSystemChat = (apiKey: string, history: ChatMessage[]) => {
   ];
 
   return ai.chats.create({
-    model: 'gemini-3-flash-preview',
+    model,
     config: {
       systemInstruction,
       tools,

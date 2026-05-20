@@ -20,6 +20,7 @@ const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 
 export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
   const user = useAppStore((s) => s.user);
+  const geminiModel = useAppStore((s) => s.geminiModel);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -92,6 +93,7 @@ export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
 
       const result = await analyzeExerciseVideo({
         apiKey,
+        model: geminiModel,
         videoBase64,
         mimeType: videoFile.type,
         quest,
@@ -119,7 +121,7 @@ export function VideoFormAnalysis({ quest, onClose }: VideoFormAnalysisProps) {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [videoFile, user, quest]);
+  }, [videoFile, user, quest, geminiModel]);
 
   return (
     <motion.div

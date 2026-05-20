@@ -27,6 +27,7 @@ import { getGymSkillDefinitionsByPillar } from '@/lib/gymSkillVariants';
 import { getInvisibleSkillHowTo } from '@/lib/skillHowTo';
 import { recordApiCall } from '@/lib/engineUsageTracker';
 import { getExercisesForQuestSync, getExerciseByIdSync, isExercisesLoaded } from '@/lib/exerciseService';
+import { DEFAULT_GEMINI_MODEL, normalizeGeminiModel } from '@/lib/geminiModels';
 
 interface AppState {
   // App State
@@ -38,6 +39,7 @@ interface AppState {
 
   // Access / integration
   geminiApiKey: string | null;
+  geminiModel: string;
   hasGymAccess: boolean | null;
   lastCheckIn?: CheckInEntry;
   recoveryStatus: RecoveryStatus;
@@ -68,6 +70,7 @@ interface AppState {
 
   // Actions: access
   setGeminiApiKey: (key: string) => void;
+  setGeminiModel: (model: string) => void;
   setGymAccess: (hasAccess: boolean) => void;
   setAvailableEquipment: (items: string[]) => void;
   setEquipmentCatalog: (items: Equipment[]) => void;
@@ -92,6 +95,7 @@ interface AppState {
     fitnessLevel: FitnessLevel;
     hasGymAccess?: boolean;
     geminiApiKey?: string;
+    geminiModel?: string;
     stats?: UserProfile['stats'];
     radarStats?: UserProfile['radarStats'];
     pillarLevels?: Record<MovementPillar, PillarLevel>;
@@ -539,6 +543,7 @@ export const useAppStore = create<AppState>()(
       soundEnabled: true,
       notificationsEnabled: false,
       geminiApiKey: null,
+      geminiModel: DEFAULT_GEMINI_MODEL,
       hasGymAccess: null,
       lastCheckIn: undefined,
       recoveryStatus: initialRecovery,
@@ -569,6 +574,14 @@ export const useAppStore = create<AppState>()(
           geminiApiKey: key,
           user: state.user ? { ...state.user, geminiApiKey: key } : state.user,
         })),
+      setGeminiModel: (model) =>
+        set((state) => {
+          const normalized = normalizeGeminiModel(model);
+          return {
+            geminiModel: normalized,
+            user: state.user ? { ...state.user, geminiModel: normalized } : state.user,
+          };
+        }),
       setGymAccess: (hasAccess) =>
         set((state) => {
           // Auto-enable common gym equipment when gym access is granted
@@ -639,6 +652,7 @@ export const useAppStore = create<AppState>()(
       logTrainingEntry: async (text) => {
         const {
           geminiApiKey,
+          geminiModel,
           user,
           pillarLevels,
           recoveryStatus,
@@ -729,6 +743,7 @@ export const useAppStore = create<AppState>()(
             body: JSON.stringify({ 
               prompt: text, 
               apiKey: geminiApiKey,
+              model: geminiModel,
               intent: 'training_log',
               context
             }),
@@ -888,6 +903,7 @@ export const useAppStore = create<AppState>()(
           hasGymAccess: data.hasGymAccess,
           availableEquipment,
           geminiApiKey: data.geminiApiKey ?? null,
+          geminiModel: data.geminiModel ?? get().geminiModel,
           bioData: data.bioData,
           availableTime: data.availableTime,
           trainingFrequency: data.trainingFrequency,
@@ -1755,6 +1771,7 @@ export const useAppStore = create<AppState>()(
         soundEnabled: state.soundEnabled,
         notificationsEnabled: state.notificationsEnabled,
         geminiApiKey: state.geminiApiKey,
+        geminiModel: state.geminiModel,
         hasGymAccess: state.hasGymAccess,
         lastCheckIn: state.lastCheckIn,
         recoveryStatus: state.recoveryStatus,

@@ -101,6 +101,7 @@ const generateProtocol = async (
   history: any[],
   options: {
     apiKey: string | null;
+    model: string;
     availableEquipment: string[];
     equipmentCatalog: any[];
     trainingHistory: any[];
@@ -154,6 +155,7 @@ const generateProtocol = async (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         apiKey: options.apiKey,
+        model: options.model,
         intent: 'generate_quests',
         context: {
           userStats: user.stats,
@@ -334,6 +336,7 @@ export function ProtocolGenerator() {
   const [highDemand, setHighDemand] = useState(false);
   const user = useAppStore((state) => state.user);
   const geminiApiKey = useAppStore((state) => state.geminiApiKey);
+  const geminiModel = useAppStore((state) => state.geminiModel);
   const availableEquipment = useAppStore((state) => state.availableEquipment);
   const equipmentCatalog = useAppStore((state) => state.equipment);
   const trainingHistory = useAppStore((state) => state.trainingHistory);
@@ -374,6 +377,7 @@ export function ProtocolGenerator() {
         try {
           const { daily, weekly, retried } = await generateProtocol(user, questHistory || [], {
             apiKey: geminiApiKey,
+            model: geminiModel,
             availableEquipment:
               enabledEquipment.length > 0
                 ? enabledEquipment
@@ -413,6 +417,7 @@ export function ProtocolGenerator() {
     user,
     questHistory,
     geminiApiKey,
+    geminiModel,
     availableEquipment,
     equipmentCatalog,
     trainingHistory,

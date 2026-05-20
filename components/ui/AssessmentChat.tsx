@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import { useAppStore } from '@/store/useAppStore';
 import { GoogleGenAI } from "@google/genai";
 import { recordApiCall, resolveTokenCount } from '@/lib/engineUsageTracker';
+import { DEFAULT_GEMINI_MODEL } from '@/lib/geminiModels';
 
 interface ChatMessage {
   id: string;
@@ -20,6 +21,7 @@ interface AssessmentChatProps {
 
 export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
   const apiKey = useAppStore((state) => state.geminiApiKey);
+  const geminiModel = useAppStore((state) => state.geminiModel);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -37,7 +39,7 @@ export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
     if (apiKey && messages.length === 0) {
         initChat();
     }
-  }, [apiKey]);
+  }, [apiKey, geminiModel]);
 
   const initChat = async () => {
     if (!apiKey) return;
@@ -46,7 +48,7 @@ export function AssessmentChat({ onComplete, context }: AssessmentChatProps) {
     const ai = new GoogleGenAI({ apiKey });
     
     chatInstance.current = ai.chats.create({
-        model: 'gemini-3-flash-preview',
+        model: geminiModel || DEFAULT_GEMINI_MODEL,
         config: {
             systemInstruction: `
                 Você é o SYSTEM CORE durante a fase de Avaliação (Awakening).

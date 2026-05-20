@@ -3,6 +3,12 @@ import { GoogleGenAI, FunctionDeclaration, Tool, Type } from '@google/genai';
 import { sanitizeText } from '@/lib/textSanitizer';
 import { promises as fs } from 'fs';
 import path from 'path';
+import {
+  DEFAULT_GEMINI_MODEL,
+  GEMINI_FLASH_LATEST_MODEL,
+  GEMINI_PRO_LATEST_MODEL,
+  normalizeGeminiModel,
+} from '@/lib/geminiModels';
 
 const setInitialProfileTool: FunctionDeclaration = {
   name: 'set_initial_profile',
@@ -278,9 +284,34 @@ const sanitizePayloadStrings = (payload: unknown): unknown => {
   return payload;
 };
 
+const DEFAULT_MODEL_FALLBACKS = [
+  DEFAULT_GEMINI_MODEL,
+  GEMINI_FLASH_LATEST_MODEL,
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+];
+
+const PRO_LATEST_FALLBACKS = ['gemini-3.1-pro-preview', 'gemini-2.5-pro'];
+
+const FLASH_LATEST_FALLBACKS = ['gemini-3.5-flash', 'gemini-2.5-flash', DEFAULT_GEMINI_MODEL];
+
+const buildModelCandidates = (requestedModel: unknown) => {
+  const selectedModel = normalizeGeminiModel(requestedModel);
+  let preferred: string[] = [selectedModel];
+
+  if (selectedModel === GEMINI_PRO_LATEST_MODEL || selectedModel === 'gemini-pro-latest') {
+    preferred = PRO_LATEST_FALLBACKS;
+  } else if (selectedModel === GEMINI_FLASH_LATEST_MODEL) {
+    preferred = [GEMINI_FLASH_LATEST_MODEL, ...FLASH_LATEST_FALLBACKS];
+  }
+
+  return Array.from(new Set([...preferred, ...DEFAULT_MODEL_FALLBACKS]));
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey, intent, context } = await request.json();
+    const { prompt, apiKey, intent, context, model } = await request.json();
 
     if (!apiKey) {
       return NextResponse.json({ error: 'API key is required' }, { status: 400 });
@@ -348,7 +379,7 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const models = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+    const models = buildModelCandidates(model);
     let result = null;
     let lastError = null;
     let retried = false;

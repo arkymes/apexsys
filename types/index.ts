@@ -70,6 +70,7 @@ export interface UserProfile {
   hasGymAccess?: boolean;
   availableEquipment?: string[];
   geminiApiKey?: string | null;
+  geminiModel?: string | null;
   bioData?: string; // Additional info from onboarding
   availableTime?: number; // Minutes per day
   trainingFrequency?: number; // Days per week

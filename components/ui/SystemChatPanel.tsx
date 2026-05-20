@@ -32,6 +32,7 @@ interface ChatPanelProps {
 
 export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) => {
   const apiKey = useAppStore((state) => state.geminiApiKey);
+  const geminiModel = useAppStore((state) => state.geminiModel);
   const user = useAppStore((state) => state.user);
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -58,6 +59,10 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    chatInstance.current = null;
+  }, [apiKey, geminiModel]);
 
   // --- TOOL EXECUTION LOGIC ---
   const executeTools = async (functionCalls: any[]) => {
@@ -899,7 +904,7 @@ export const SystemChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) =
 
     try {
       if (!chatInstance.current) {
-        chatInstance.current = createSystemChat(apiKey, messages); 
+        chatInstance.current = createSystemChat(apiKey, messages, geminiModel); 
       }
       
       let result = await sendWithRetry({ message: userMsg.text });

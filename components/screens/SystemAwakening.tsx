@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, Key } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
+import { GEMINI_MODEL_OPTIONS } from '@/lib/geminiModels';
 
 export function SystemAwakening() {
   const [showNotification, setShowNotification] = useState(true);
@@ -12,9 +13,12 @@ export function SystemAwakening() {
   const [hunterName, setHunterName] = useState('');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [model, setModel] = useState(GEMINI_MODEL_OPTIONS[0].value);
   const setScreen = useAppStore((state) => state.setScreen);
   const geminiApiKey = useAppStore((state) => state.geminiApiKey);
+  const geminiModel = useAppStore((state) => state.geminiModel);
   const setGeminiApiKey = useAppStore((state) => state.setGeminiApiKey);
+  const setGeminiModel = useAppStore((state) => state.setGeminiModel);
 
   // Countdown timer
   useEffect(() => {
@@ -54,11 +58,18 @@ export function SystemAwakening() {
   const handleSubmitApiKey = () => {
     if (!apiKey.trim()) return;
     setGeminiApiKey(apiKey.trim());
+    setGeminiModel(model);
     setShowApiKeyInput(false);
     setTimeout(() => {
       setShowNameInput(true);
     }, 500);
   };
+
+  useEffect(() => {
+    if (showApiKeyInput) {
+      setModel(geminiModel);
+    }
+  }, [showApiKeyInput, geminiModel]);
 
   const handleSubmitName = () => {
     if (!hunterName.trim()) return;
@@ -227,6 +238,21 @@ export function SystemAwakening() {
                 autoFocus
                 className="input-cyber w-full text-lg"
               />
+
+              <p className="text-white/60 text-sm font-display uppercase tracking-wider mt-4 mb-2">
+                Modelo Gemini:
+              </p>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="input-cyber w-full text-sm"
+              >
+                {GEMINI_MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Button */}

@@ -41,6 +41,7 @@ import type {
 import { SKILL_DEFINITIONS } from '@/lib/skillDefinitions';
 import { buildEquipmentCatalogFromNames, normalizeEquipmentCatalog, EQUIPMENT_PT_BR } from '@/lib/equipmentCatalog';
 import { recordApiCall } from '@/lib/engineUsageTracker';
+import { GEMINI_MODEL_OPTIONS, normalizeGeminiModel } from '@/lib/geminiModels';
 
 interface AssessmentData {
   height: number;
@@ -524,9 +525,12 @@ export function HunterAssessment() {
   // API Key handling
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [tempApiKey, setTempApiKey] = useState('');
+  const [tempGeminiModel, setTempGeminiModel] = useState('');
   
   const geminiApiKey = useAppStore((state) => state.geminiApiKey);
+  const geminiModel = useAppStore((state) => state.geminiModel);
   const setGeminiApiKey = useAppStore((state) => state.setGeminiApiKey);
+  const setGeminiModel = useAppStore((state) => state.setGeminiModel);
   const setAvailableEquipment = useAppStore((state) => state.setAvailableEquipment);
 
   const setScreen = useAppStore((state) => state.setScreen);
@@ -548,6 +552,7 @@ export function HunterAssessment() {
     if (step < totalSteps - 1) {
       // Before entering Chat (Step 8), ensure API Key
       if (step === 7 && !geminiApiKey) {
+          setTempGeminiModel(geminiModel);
           setShowApiKeyModal(true);
           return;
       }
@@ -565,25 +570,32 @@ export function HunterAssessment() {
   };
 
   const saveApiKeyAndRetry = () => {
-      if(tempApiKey.trim()) {
-          setGeminiApiKey(tempApiKey.trim());
-          setShowApiKeyModal(false);
-          
-          // Only retry submission if we are at the final step (Chat/Bio) or later
-          // Step 7 is the Chat.
-          if (step === totalSteps - 1) {
-              handleComplete(undefined, tempApiKey.trim());
-          }
+      const nextKey = tempApiKey.trim();
+      const resolvedModel = normalizeGeminiModel(tempGeminiModel || geminiModel);
+      if (!nextKey && !geminiApiKey) return;
+
+      if (nextKey) {
+        setGeminiApiKey(nextKey);
+      }
+      setGeminiModel(resolvedModel);
+      setShowApiKeyModal(false);
+      
+      // Only retry submission if we are at the final step (Chat/Bio) or later
+      // Step 7 is the Chat.
+      if (step === totalSteps - 1) {
+        handleComplete(undefined, nextKey || undefined, resolvedModel);
       }
   };
 
-  const handleComplete = async (overrideBio?: string, overrideKey?: string) => {
+  const handleComplete = async (overrideBio?: string, overrideKey?: string, overrideModel?: string) => {
     const finalBio = overrideBio ?? bioInfo;
     const activeKey = overrideKey || geminiApiKey;
+    const activeModel = overrideModel || geminiModel;
     const parsedEquipment = parseEquipmentInput(data.equipmentNotes);
     setAvailableEquipment(parsedEquipment);
 
     if (!activeKey) {
+        setTempGeminiModel(geminiModel);
         setShowApiKeyModal(true);
         return;
     }
@@ -668,6 +680,7 @@ export function HunterAssessment() {
         body: JSON.stringify({ 
           prompt, 
           apiKey: activeKey, 
+          model: activeModel,
           intent: 'assessment'
         }),
       });
@@ -769,9 +782,10 @@ export function HunterAssessment() {
       <button
         onClick={() => {
           setTempApiKey(geminiApiKey || '');
+          setTempGeminiModel(geminiModel);
           setShowApiKeyModal(true);
         }}
-        title="Alterar chave da API"
+        title="Alterar chave e modelo da IA"
         className="fixed top-3 right-3 z-50 p-2 rounded-lg bg-shadow-800/80 border border-white/10 hover:border-neon-blue/40 hover:bg-neon-blue/10 transition-all group"
       >
         <Key className="w-3.5 h-3.5 text-white/30 group-hover:text-neon-blue transition-colors" />
@@ -1319,12 +1333,27 @@ export function HunterAssessment() {
                         className="w-full bg-shadow-800 border border-white/10 p-3 rounded text-white font-mono text-sm mb-6 focus:border-neon-blue focus:outline-none"
                     />
 
+                    <label className="block text-white/60 text-xs uppercase tracking-wider mb-2">
+                        Modelo Gemini
+                    </label>
+                    <select
+                        value={tempGeminiModel || geminiModel}
+                        onChange={(e) => setTempGeminiModel(e.target.value)}
+                        className="w-full bg-shadow-800 border border-white/10 p-3 rounded text-white font-mono text-sm mb-6 focus:border-neon-blue focus:outline-none"
+                    >
+                        {GEMINI_MODEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                    </select>
+
                     <div className="flex gap-4">
                         <Button variant="outline" onClick={() => setShowApiKeyModal(false)} className="flex-1">
                             Cancelar
                         </Button>
-                        <Button variant="cyber" onClick={saveApiKeyAndRetry} disabled={!tempApiKey.trim()} className="flex-1">
-                            Conectar Núcleo
+                        <Button variant="cyber" onClick={saveApiKeyAndRetry} disabled={!tempApiKey.trim() && !geminiApiKey} className="flex-1">
+                            Salvar Config
                         </Button>
                     </div>
                 </GlassPanel>
